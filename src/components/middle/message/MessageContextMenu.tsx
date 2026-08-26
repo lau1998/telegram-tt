@@ -103,6 +103,7 @@ type OwnProps = {
   isPrivate?: boolean;
   isCurrentUserPremium?: boolean;
   canDownload?: boolean;
+  hasMedia?: boolean;
   canSaveGif?: boolean;
   canManageMusicInProfile?: boolean;
   isMusicProfileStatusLoaded?: boolean;
@@ -140,6 +141,7 @@ type OwnProps = {
   onCopyMessages?: (request: MessageCopyRequest, textFormat?: ClipboardTextFormat) => void;
   onCopyNumber?: NoneToVoidFunction;
   onDownload?: NoneToVoidFunction;
+  onSaveMediaStream?: NoneToVoidFunction;
   onSaveGif?: NoneToVoidFunction;
   onToggleMusicInProfile?: NoneToVoidFunction;
   onCancelVote?: NoneToVoidFunction;
@@ -203,6 +205,7 @@ const MessageContextMenu = ({
   canCopyLink,
   canSelect,
   canDownload,
+  hasMedia,
   canSaveGif,
   canManageMusicInProfile,
   isMusicProfileStatusLoaded,
@@ -245,6 +248,7 @@ const MessageContextMenu = ({
   onCopyLink,
   onCopyNumber,
   onDownload,
+  onSaveMediaStream,
   onSaveGif,
   onToggleMusicInProfile,
   onCancelVote,
@@ -587,6 +591,11 @@ const MessageContextMenu = ({
         {canDownload && (
           <MenuItem icon="download" onClick={onDownload}>
             {isDownloading ? oldLang('lng_context_cancel_download') : oldLang('lng_media_download')}
+          </MenuItem>
+        )}
+        {hasMedia && (
+          <MenuItem icon="download" onClick={onSaveMediaStream}>
+            {lang('MediaStreamSave')}
           </MenuItem>
         )}
         {canForward && <MenuItem icon="forward" onClick={onForward}>{oldLang('Forward')}</MenuItem>}

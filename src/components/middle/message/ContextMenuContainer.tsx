@@ -32,6 +32,7 @@ import {
   areReactionsEmpty,
   getCanPostInChat,
   getIsDownloading,
+  getMediaHash,
   getMessageAudio,
   getMessageVideo,
   getUserFullName,
@@ -81,6 +82,7 @@ import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { isUserId } from '../../../util/entities/ids';
 import { getTranslationCacheKey, parseTranslationCacheKey } from '../../../util/keys/translationKey';
+import { save_media_stream } from '../../../util/saveMediaStream';
 import { getSelectionAsFormattedText } from './helpers/getSelectionAsFormattedText';
 import { isSelectionRangeInsideMessage } from './helpers/isSelectionRangeInsideMessage';
 
@@ -672,6 +674,16 @@ const ContextMenuContainer = ({
     closeMenu();
   });
 
+  /** 直接保存当前媒体消息流，绕过全局媒体缓存下载状态 */
+  const handleSaveMediaStream = useLastCallback(() => {
+    const media = selectMessageDownloadableMedia(getGlobal(), message);
+    const mediaHash = media && getMediaHash(media, 'download');
+    closeMenu();
+    void save_media_stream(message, { mediaHash }).catch(() => {
+      showNotification({ message: lang('NativeDownloadFailed') });
+    });
+  });
+
   const handleSaveGif = useLastCallback(() => {
     const video = getMessageVideo(message);
     saveGif({ gif: video! });
@@ -855,6 +867,8 @@ const ContextMenuContainer = ({
         onCopyMessages={handleCopyMessages}
         onCopyNumber={handleCopyNumber}
         onDownload={handleDownloadClick}
+        onSaveMediaStream={handleSaveMediaStream}
+        hasMedia={Boolean(selectMessageDownloadableMedia(getGlobal(), message))}
         onSaveGif={handleSaveGif}
         onToggleMusicInProfile={handleToggleMusicInProfile}
         onCancelVote={handleCancelVote}

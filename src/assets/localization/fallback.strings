@@ -890,6 +890,7 @@
 "PollsStop" = "Stop poll";
 "ContextCancelDownload" = "Cancel Download";
 "MediaDownload" = "Download";
+"MediaStreamSave" = "Save media stream";
 "CommonSelect" = "Select";
 "ContextReportMsg" = "Report";
 "ChatContextReactionCount_one" = "1 reaction";

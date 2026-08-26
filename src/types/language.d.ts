@@ -761,6 +761,7 @@ export interface LangPair {
   'PollsStop': undefined;
   'ContextCancelDownload': undefined;
   'MediaDownload': undefined;
+  'MediaStreamSave': undefined;
   'CommonSelect': undefined;
   'ContextReportMsg': undefined;
   'ConversationContextMenuNoViews': undefined;
