@@ -100,6 +100,16 @@ body.is-tauri {
   --window-controls-width: 5rem;
 }
 
+body.is-tauri.is-macos {
+  // 原生标题栏不占用网页内容区域
+  --window-controls-width: 0rem;
+
+  @media (min-width: 926px) {
+    --desktop-panel-gap: 0.625rem;
+    --right-column-padding: var(--desktop-panel-gap);
+  }
+}
+
 body.no-page-transitions {
   --pane-slide-transition: 0s;
 }

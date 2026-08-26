@@ -33,7 +33,7 @@ import {
 } from '../../global/selectors';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
-import { IS_ANDROID, IS_MAC_OS, IS_WAVE_TRANSFORM_SUPPORTED } from '../../util/browser/windowEnvironment';
+import { IS_ANDROID, IS_WAVE_TRANSFORM_SUPPORTED } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import { waitForTransitionEnd } from '../../util/cssAnimationEndListeners';
 import { processDeepLink } from '../../util/deeplink';
@@ -302,12 +302,6 @@ const Main = ({
       toggleLeftColumn();
     }
   }, [isDesktop, isLeftColumnOpen, isMiddleColumnOpen, isMobile, toggleLeftColumn]);
-
-  useEffect(() => {
-    if (IS_TAURI && IS_MAC_OS) {
-      window.tauri?.markTitleBarOverlay(true, isMobile);
-    }
-  }, [isMobile]);
 
   useInterval(checkAppVersion, isMasterTab ? APP_OUTDATED_TIMEOUT_MS : undefined, true);
 
@@ -615,9 +609,6 @@ const Main = ({
       className={className}
       bgClassName={bgClassName}
     >
-      {IS_TAURI && IS_MAC_OS && (
-        <div className="tauri-drag-region" data-tauri-drag-region />
-      )}
       <FoldersSidebar isMobile={isMobile} isActive={isFoldersSidebarShown} />
       <LeftColumn ref={leftColumnRef} isFoldersSidebarShown={isFoldersSidebarShown} />
       <MiddleColumn

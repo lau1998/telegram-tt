@@ -34,16 +34,6 @@
   }
 }
 
-.tauri-drag-region {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: 0;
-  left: 0;
-
-  height: 1rem;
-}
-
 .has-call-header {
   --call-header-height: 2rem;
 
@@ -85,7 +75,7 @@
   min-width: var(--left-column-min-width);
   max-width: var(--left-column-max-width);
   height: auto;
-  margin: 1rem;
+  margin: var(--desktop-panel-gap, 1rem);
   margin-inline-end: 0;
   border-radius: var(--border-radius-island);
 

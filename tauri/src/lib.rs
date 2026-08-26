@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use serde_json::json;
-use tauri::{Emitter, LogicalPosition, Manager, webview::DownloadEvent};
+use tauri::{Emitter, Manager, webview::DownloadEvent};
 use url::Url;
 use uuid::Uuid;
 
@@ -12,9 +12,6 @@ use deeplink::Deeplink;
 mod tray;
 mod window;
 use crate::window::{WINDOW_STATES, WindowState};
-
-#[cfg(target_os = "macos")]
-mod mac;
 
 #[derive(Debug)]
 pub struct AppStateStruct {
@@ -32,30 +29,6 @@ impl Default for AppStateStruct {
 }
 
 pub type AppState = Mutex<AppStateStruct>;
-
-pub const TRAFFIC_LIGHT_POSITION_OVERLAY_LEGACY: LogicalPosition<f64> = LogicalPosition::new(26.0, 46.0);
-pub const TRAFFIC_LIGHT_POSITION_OVERLAY_26: LogicalPosition<f64> = LogicalPosition::new(26.0, 50.0);
-pub const TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE_LEGACY: LogicalPosition<f64> = LogicalPosition::new(16.0, 30.0);
-pub const TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE_26: LogicalPosition<f64> = LogicalPosition::new(16.0, 34.0);
-pub const TRAFFIC_LIGHT_POSITION_DEFAULT: LogicalPosition<f64> = LogicalPosition::new(14.0, 19.0);
-
-pub static TRAFFIC_LIGHT_POSITION_OVERLAY: LazyLock<LogicalPosition<f64>> = LazyLock::new(|| {
-  if let tauri_plugin_os::Version::Semantic(major, _, _) = tauri_plugin_os::version() {
-      if major >= 26 {
-          return TRAFFIC_LIGHT_POSITION_OVERLAY_26;
-      }
-  }
-  TRAFFIC_LIGHT_POSITION_OVERLAY_LEGACY
-});
-
-pub static TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE: LazyLock<LogicalPosition<f64>> = LazyLock::new(|| {
-  if let tauri_plugin_os::Version::Semantic(major, _, _) = tauri_plugin_os::version() {
-      if major >= 26 {
-          return TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE_26;
-      }
-  }
-  TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE_LEGACY
-});
 
 pub const WINDOW_WIDTH: f64 = 1088.0;
 pub const WINDOW_HEIGHT: f64 = 700.0;
@@ -111,7 +84,6 @@ pub fn run() {
         open_new_window(app.clone(), BASE_URL.to_string()).unwrap();
       }
     }))
-    .plugin(tauri_plugin_os::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_notification::init())
@@ -133,30 +105,6 @@ pub fn run() {
         #[cfg(not(target_os = "macos"))]
         window.hide().unwrap_or_default();
         api.prevent_close();
-      }
-    }
-    tauri::WindowEvent::ThemeChanged(_) => {
-      #[cfg(target_os = "macos")]
-      if let Some(base_window) = window.app_handle().get_window(window.label()) {
-        if let Ok(mut states) = WINDOW_STATES.lock() {
-          if let Some(state) = states.get_mut(window.label()) {
-            let title = if state.is_overlay {
-              "".to_string()
-            } else {
-              state.title.clone()
-            };
-            let traffic_position = if state.is_overlay {
-              if state.is_mobile {
-                *TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE
-              } else {
-                *TRAFFIC_LIGHT_POSITION_OVERLAY
-              }
-            } else {
-              TRAFFIC_LIGHT_POSITION_DEFAULT
-            };
-            mac::update_window_title(base_window.clone(), title, traffic_position);
-          }
-        }
       }
     }
     tauri::WindowEvent::Destroyed => {
@@ -191,7 +139,6 @@ pub fn run() {
   });
 
   let app = app.invoke_handler(tauri::generate_handler![
-    mark_title_bar_overlay,
     set_notifications_count,
     set_window_title,
     open_new_window_cmd,
@@ -202,72 +149,6 @@ pub fn run() {
   app
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
-}
-
-#[tauri::command]
-#[cfg(target_os = "macos")]
-fn mark_title_bar_overlay(window: tauri::WebviewWindow, is_overlay: bool, is_mobile: Option<bool>) {
-  use crate::mac;
-
-  let mut is_mobile_val = false;
-
-  if let Ok(mut states) = WINDOW_STATES.lock() {
-    if let Some(state) = states.get_mut(window.label()) {
-      state.is_overlay = is_overlay;
-      // Only `Some` updates the stored flag; `None` keeps the previous value
-      if let Some(mobile) = is_mobile {
-        state.is_mobile = mobile;
-      }
-      is_mobile_val = state.is_mobile;
-    }
-  }
-
-  if is_overlay {
-    let position = if is_mobile_val {
-      *TRAFFIC_LIGHT_POSITION_OVERLAY_MOBILE
-    } else {
-      *TRAFFIC_LIGHT_POSITION_OVERLAY
-    };
-
-    window
-      .set_title_bar_style(tauri::utils::TitleBarStyle::Overlay)
-      .unwrap_or_default();
-
-    if let Some(base_window) = window.app_handle().get_window(window.label()) {
-      mac::update_window_title(
-        base_window.clone(),
-        "".to_string(),
-        position,
-      );
-    }
-  } else {
-    window
-      .set_title_bar_style(tauri::utils::TitleBarStyle::Visible)
-      .unwrap_or_default();
-
-    // Determine the title we should restore.
-    let mut title_to_set = DEFAULT_WINDOW_TITLE.to_string();
-    if let Ok(states) = WINDOW_STATES.lock() {
-      if let Some(state) = states.get(window.label()) {
-        title_to_set = state.title.clone();
-      }
-    }
-
-    if let Some(base_window) = window.app_handle().get_window(window.label()) {
-      mac::update_window_title(
-        base_window.clone(),
-        title_to_set,
-        TRAFFIC_LIGHT_POSITION_DEFAULT,
-      );
-    }
-  }
-}
-
-#[tauri::command]
-#[cfg(not(target_os = "macos"))]
-#[allow(unused_variables)]
-fn mark_title_bar_overlay(window: tauri::WebviewWindow, is_overlay: bool, is_mobile: Option<bool>) {
-  // noop
 }
 
 #[tauri::command]
@@ -296,9 +177,7 @@ fn set_window_title(window: tauri::WebviewWindow, title: String) {
   if let Ok(mut states) = WINDOW_STATES.lock() {
     if let Some(state) = states.get_mut(window.label()) {
       state.title = title.clone();
-      if !state.is_overlay {
-        window.set_title(&title).unwrap_or_default();
-      }
+      window.set_title(&title).unwrap_or_default();
     }
   }
 }
@@ -375,23 +254,11 @@ pub(crate) fn open_new_window(
   if let Ok(mut states) = WINDOW_STATES.lock() {
     let new_state = WindowState {
       title: DEFAULT_WINDOW_TITLE.to_string(),
-      is_overlay: cfg!(target_os = "macos"),
-      is_mobile: false,
     };
     states.insert(window_label.to_string(), new_state);
   }
 
-  #[cfg(target_os = "macos")]
-  let new_window_builder = new_window_builder.title_bar_style(tauri::TitleBarStyle::Overlay);
-  #[cfg(target_os = "macos")]
-  let new_window_builder = new_window_builder.title("");
-
   let window = new_window_builder.build().map_err(|err| err.to_string())?;
-
-  #[cfg(target_os = "macos")]
-  if let Some(base_window) = app.get_window(&window_label) {
-    mac::setup_traffic_light_positioner(&base_window, *TRAFFIC_LIGHT_POSITION_OVERLAY);
-  }
 
   // Apply stored notification count to the new window
   if let Some(state) = app.try_state::<AppState>() {

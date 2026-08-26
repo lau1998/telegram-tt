@@ -4,7 +4,6 @@
   "local": true,
   "webviews": ["*"],
   "permissions": [
-    "allow-mark-title-bar-overlay",
     "allow-set-notifications-count",
     "allow-set-window-title",
     "allow-open-new-window-cmd",

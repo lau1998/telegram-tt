@@ -19,7 +19,7 @@ import * as langProvider from '../../../util/oldLangProvider';
 import updateIcon from '../../../util/updateIcon';
 import { setPageTitle, setPageTitleInstant } from '../../../util/updatePageTitle';
 import {
-  canEditMediaInEditor, getAllowedAttachmentOptions, getChatTitle, runForFocusedTabs,
+  canEditMediaInEditor, getAllowedAttachmentOptions, getChatTitle, getMainUsername, runForFocusedTabs,
 } from '../../helpers';
 import { addTabStateResetterAction } from '../../helpers/meta';
 import {
@@ -41,6 +41,7 @@ import {
   selectSender,
   selectTabState,
   selectTopic,
+  selectUser,
 } from '../../selectors';
 import { selectSharedSettings } from '../../selectors/sharedState';
 
@@ -806,14 +807,23 @@ addActionHandler('updatePageTitle', (global, actions, payload): ActionReturnType
   const { tabId = getCurrentTabId() } = payload || {};
   const { canDisplayChatInTitle } = selectSharedSettings(global);
   const currentUserId = global.currentUserId;
+  const currentUser = currentUserId ? selectUser(global, currentUserId) : undefined;
   const isTestServer = global.config?.isTestServer;
   const prefix = isTestServer ? '[T] ' : '';
 
   const defaultTitle = IS_TAURI ? PAGE_TITLE_TAURI : PAGE_TITLE;
+  const username = currentUser && getMainUsername(currentUser);
+  const tauriTitle = username ? `${PAGE_TITLE_TAURI} @${username}` : PAGE_TITLE_TAURI;
 
   if (document.title.includes(INACTIVE_MARKER)) {
     updateIcon(false);
-    setPageTitleInstant(`${prefix}${defaultTitle} ${INACTIVE_MARKER}`);
+    setPageTitleInstant(`${prefix}${IS_TAURI ? tauriTitle : defaultTitle} ${INACTIVE_MARKER}`);
+    return;
+  }
+
+  if (IS_TAURI) {
+    // 原生窗口标题始终标识当前账号，不随聊天切换
+    setPageTitleInstant(`${prefix}${tauriTitle}`);
     return;
   }
 

@@ -8,7 +8,8 @@
   justify-content: space-between;
 
   width: var(--folders-sidebar-width);
-  margin: 1rem 0 1rem 1rem;
+  margin: var(--desktop-panel-gap, 1rem) 0;
+  margin-left: var(--desktop-panel-gap, 1rem);
   border-radius: var(--border-radius-island);
 
   &::before {
