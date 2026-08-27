@@ -1,10 +1,11 @@
 import type { FC } from '../../lib/teact/teact';
 import { memo, useMemo } from '../../lib/teact/teact';
-import { getActions, withGlobal } from '../../global';
+import { getActions, getGlobal, withGlobal } from '../../global';
 
-import type { ApiChat, ApiChatFullInfo } from '../../api/types';
+import type { ApiChat, ApiChatFullInfo, ApiMessage } from '../../api/types';
 import type { ActiveDownloads, MediaViewerOrigin, MessageListType } from '../../types';
 import type { IconName } from '../../types/icons';
+import type { SaveMediaStreamRequest } from '../../util/saveMediaStream';
 import type { MenuItemProps } from '../ui/MenuItem';
 import type { MediaViewerItem, ViewableMedia } from './helpers/getViewableMedia';
 
@@ -12,25 +13,29 @@ import {
   canEditMediaInEditor,
   getAllowedAttachmentOptions,
   getIsDownloading,
-  getMediaFilename,
   getMediaFormat,
   getMediaHash,
 } from '../../global/helpers';
 import {
   selectActiveDownloads,
   selectAllowedMessageActionsSlow, selectCanForwardMessage,
-  selectChatFullInfo, selectCurrentChat,
+  selectChatFullInfo, selectChatMessages,
+  selectCurrentChat,
   selectCurrentMessageList,
   selectIsChatProtected,
   selectIsMessageProtected,
+  selectMessageIdsByGroupId,
   selectPerformanceSettingsValue,
   selectTabState,
 } from '../../global/selectors';
+import { selectMessageDownloadableMedia } from '../../global/selectors/media';
 import { isUserId } from '../../util/entities/ids';
+import { saveMediaStreams } from '../../util/saveMediaStream';
 import selectViewableMedia from './helpers/getViewableMedia';
 
 import useAppLayout from '../../hooks/useAppLayout';
 import useFlag from '../../hooks/useFlag';
+import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import useMediaWithLoadProgress from '../../hooks/useMediaWithLoadProgress';
 import useOldLang from '../../hooks/useOldLang';
@@ -50,7 +55,6 @@ const EDITOR_OPEN_TIMEOUT = 3000;
 
 type OwnProps = {
   item?: MediaViewerItem;
-  mediaData?: string;
   isVideo: boolean;
   canUpdateMedia?: boolean;
   canReportAvatar?: boolean;
@@ -79,7 +83,6 @@ type StateProps = {
 
 const MediaViewerActions: FC<OwnProps & StateProps> = ({
   item,
-  mediaData,
   isVideo,
   chat,
   chatFullInfo,
@@ -107,6 +110,9 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
   const {
     downloadMedia,
     cancelMediaDownload,
+    cancelMediaHashDownloads,
+    showNotification,
+    updateMediaDownloadProgress,
     updateProfilePhoto,
     updateChatPhoto,
     openMediaViewer,
@@ -129,7 +135,6 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
   );
 
   const { media } = viewableMedia || {};
-  const fileName = media && getMediaFilename(media);
   const isDownloading = media && getIsDownloading(activeDownloads, media);
 
   const { loadProgress: downloadProgress } = useMediaWithLoadProgress(
@@ -146,6 +151,60 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
     } else {
       downloadMedia({ media, originMessage: message });
     }
+  });
+
+  const handleSaveMediaStream = useLastCallback(() => {
+    if (!message || !media) return;
+
+    const global = getGlobal();
+    let messages = [message];
+    if (message.groupedId) {
+      const chatMessages = selectChatMessages(global, message.chatId);
+      const groupedMessageIds = selectMessageIdsByGroupId(global, message.chatId, message.groupedId);
+      const groupedMessages = groupedMessageIds?.reduce<ApiMessage[]>((result, groupedMessageId) => {
+        const groupedMessage = chatMessages?.[groupedMessageId];
+        if (groupedMessage) {
+          result.push(groupedMessage);
+        }
+
+        return result;
+      }, []);
+
+      if (groupedMessages?.length) {
+        messages = groupedMessages;
+      }
+    }
+
+    const requests = messages.reduce<SaveMediaStreamRequest[]>((result, currentMessage) => {
+      const currentMedia = currentMessage.id === message.id
+        ? media
+        : selectMessageDownloadableMedia(global, currentMessage);
+      if (currentMedia) {
+        result.push({ message: currentMessage, media: currentMedia });
+      }
+
+      return result;
+    }, []);
+    if (!requests.length) return;
+
+    saveMediaStreams(requests, {
+      onStart: ({ message: originMessage, media: currentMedia }) => {
+        downloadMedia({ media: currentMedia, originMessage, isSaveMediaStream: true });
+      },
+      onProgress: ({ mediaHash }, progress) => {
+        updateMediaDownloadProgress({ mediaHash, progress });
+      },
+      onComplete: ({ mediaHash }) => {
+        cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
+      },
+      onError: ({ mediaHash }) => {
+        const isCanceled = !selectActiveDownloads(getGlobal())[mediaHash];
+        cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
+        if (!isCanceled) {
+          showNotification({ message: newLang('NativeDownloadFailed') });
+        }
+      },
+    });
   });
 
   const handleZoomOut = useLastCallback(() => {
@@ -199,6 +258,7 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
   });
 
   const lang = useOldLang();
+  const newLang = useLang();
 
   const MenuButton: FC<{ onTrigger: () => void; isOpen?: boolean }> = useMemo(() => {
     return ({ onTrigger, isOpen }) => (
@@ -227,11 +287,11 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
   }
 
   function renderDownloadButton() {
-    if (isProtected || item?.type === 'standalone') {
+    if (isProtected || item?.type === 'standalone' || item?.type === 'sponsoredMessage' || !media) {
       return undefined;
     }
 
-    return item?.type !== 'sponsoredMessage' && (isVideo ? (
+    return (
       <Button
         round
         size="smaller"
@@ -245,17 +305,24 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
           <Icon name="download" />
         )}
       </Button>
-    ) : (
+    );
+  }
+
+  function renderSaveMediaStreamButton() {
+    if (isProtected || item?.type === 'sponsoredMessage' || !message || !media) {
+      return undefined;
+    }
+
+    return (
       <Button
-        href={mediaData}
-        download={fileName}
         round
         size="smaller"
         color="translucent-white"
-        ariaLabel={lang('AccActionDownload')}
-        iconName="download"
+        ariaLabel={newLang('MediaStreamSave')}
+        onClick={handleSaveMediaStream}
+        iconName="cloud-download"
       />
-    ));
+    );
   }
 
   const openDeleteModalHandler = useLastCallback(() => {
@@ -298,18 +365,21 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
       });
     }
     if (!isProtected) {
-      if (isVideo) {
+      if (media) {
         menuItems.push({
           icon: isDownloading ? 'close' : 'download',
           onClick: handleDownloadClick,
-          children: isDownloading ? `${Math.round(downloadProgress * 100)}% Downloading...` : 'Download',
+          children: isDownloading
+            ? newLang('MediaViewDownloading', { count: Math.round(downloadProgress * 100) })
+            : newLang('MediaDownload'),
         });
-      } else {
+      }
+
+      if (message && media) {
         menuItems.push({
-          icon: 'download',
-          href: mediaData,
-          download: fileName,
-          children: lang('AccActionDownload'),
+          icon: 'cloud-download',
+          onClick: handleSaveMediaStream,
+          children: newLang('MediaStreamSave'),
         });
       }
     }
@@ -401,6 +471,7 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
         />
       )}
       {renderDownloadButton()}
+      {renderSaveMediaStreamButton()}
       <Button
         round
         size="smaller"

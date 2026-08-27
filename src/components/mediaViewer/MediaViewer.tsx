@@ -176,7 +176,6 @@ const MediaViewer = ({
     isVideo,
     isPhoto,
     bestImageData,
-    bestData,
     dimensions,
     isGif,
     contentType,
@@ -578,7 +577,6 @@ const MediaViewer = ({
           />
         </Transition>
         <MediaViewerActions
-          mediaData={bestData}
           isVideo={isVideo}
           item={currentItem}
           canUpdateMedia={canUpdateMedia}

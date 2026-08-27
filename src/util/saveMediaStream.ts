@@ -1,16 +1,11 @@
 import type { ApiMessage, ApiOnProgress } from '../api/types';
+import type { DownloadableMedia } from '../global/helpers/messageMedia';
 import { ApiMediaFormat } from '../api/types';
 
 import {
   getMediaFilename,
-  getMessageActionPhoto,
-  getMessageAudio,
-  getMessageDocument,
-  getMessageMediaHash,
-  getMessagePhoto,
-  getMessageSticker,
-  getMessageVideo,
-  getMessageVoice,
+  getMediaFileSize,
+  getMediaHash,
 } from '../global/helpers/messageMedia';
 import { callApi, cancelApiProgress } from '../api/gramjs';
 import download from './download';
@@ -19,14 +14,28 @@ const MAX_DOWNLOAD_ATTEMPTS = 3;
 const FALLBACK_MIME_TYPE = 'application/octet-stream';
 const activeProgressCallbacks = new Map<string, ApiOnProgress>();
 
-/** 描述媒体流保存时可选的文件名、媒体 hash 和下载进度回调 */
+export type SaveMediaStreamRequest = {
+  message: ApiMessage;
+  media: DownloadableMedia;
+};
+
+export type SaveMediaStreamContext = SaveMediaStreamRequest & {
+  mediaHash: string;
+};
+
 export type SaveMediaStreamOptions = {
   fileName?: string;
   mediaHash?: string;
-  progressCallback?: (downloaded: number, total?: number) => void;
+  onProgress?: (progress: number) => void;
 };
 
-/** 取消指定媒体的流式保存请求 */
+export type SaveMediaStreamsOptions = {
+  onStart?: (context: SaveMediaStreamContext) => void;
+  onProgress?: (context: SaveMediaStreamContext, progress: number) => void;
+  onComplete?: (context: SaveMediaStreamContext) => void;
+  onError?: (context: SaveMediaStreamContext) => void;
+};
+
 export function cancelSaveMediaStream(mediaHash: string) {
   const progressCallback = activeProgressCallbacks.get(mediaHash);
   if (!progressCallback) return;
@@ -35,34 +44,47 @@ export function cancelSaveMediaStream(mediaHash: string) {
   activeProgressCallbacks.delete(mediaHash);
 }
 
-/** 通过 UI API 下载消息媒体并保存到浏览器默认下载目录 */
-export async function save_media_stream(
+export function saveMediaStreams(requests: SaveMediaStreamRequest[], options: SaveMediaStreamsOptions) {
+  requests.forEach((request) => {
+    const mediaHash = getMediaHash(request.media, 'download');
+    if (!mediaHash) return;
+
+    const context = {
+      ...request,
+      mediaHash,
+    } satisfies SaveMediaStreamContext;
+
+    options.onStart?.(context);
+
+    void saveMediaStream(request.message, request.media, {
+      mediaHash,
+      onProgress: (progress) => {
+        options.onProgress?.(context, progress);
+      },
+    }).then(() => {
+      options.onComplete?.(context);
+    }).catch(() => {
+      options.onError?.(context);
+    });
+  });
+}
+
+export async function saveMediaStream(
   message: ApiMessage,
+  media: DownloadableMedia,
   options?: SaveMediaStreamOptions,
 ): Promise<{ fileName: string; size: number }> {
   const messageId = message.id.toString();
-  const mediaHash = options?.mediaHash || getMessageMediaHash(
-    message,
-    {},
-    'download',
-  );
-  if (!mediaHash) throw createSaveError(messageId, '消息不包含可下载媒体');
-  const media = getMessageVideo(message)
-    || getMessagePhoto(message)
-    || getMessageActionPhoto(message)
-    || getMessageDocument(message)
-    || getMessageSticker(message)
-    || getMessageAudio(message)
-    || getMessageVoice(message);
-  const total = media && 'size' in media ? media.size : undefined;
+  const mediaHash = options?.mediaHash || getMediaHash(media, 'download');
+  if (!mediaHash) throw createSaveError(messageId, 'Message has no downloadable media');
 
+  const total = getMediaFileSize(media);
   let result: Awaited<ReturnType<typeof callApi<'downloadMedia'>>>;
   const progressCallback: ApiOnProgress = (progress) => {
-    options?.progressCallback?.(total ? progress * total : progress, total);
+    options?.onProgress?.(progress);
   };
   activeProgressCallbacks.set(mediaHash, progressCallback);
 
-  // 下载错误最多重试三次，避免网络抖动导致保存流程无限等待
   for (let attempt = 0; attempt < MAX_DOWNLOAD_ATTEMPTS; attempt++) {
     try {
       result = await callApi('downloadMedia', {
@@ -74,14 +96,15 @@ export async function save_media_stream(
     } catch (err: unknown) {
       if (attempt === MAX_DOWNLOAD_ATTEMPTS - 1) {
         activeProgressCallbacks.delete(mediaHash);
-        throw createSaveError(messageId, '下载消息媒体失败', err);
+        throw createSaveError(messageId, 'Failed to download message media', err);
       }
     }
   }
 
   activeProgressCallbacks.delete(mediaHash);
 
-  if (!result?.dataBlob) throw createSaveError(messageId, '下载消息媒体为空');
+  if (!result?.dataBlob) throw createSaveError(messageId, 'Downloaded message media is empty');
+
   let blob: Blob;
   let blobUrl: string | undefined;
   let isUrlRevoked = false;
@@ -95,17 +118,15 @@ export async function save_media_stream(
     blob = result.dataBlob instanceof Blob
       ? result.dataBlob
       : new Blob([result.dataBlob], { type: result.mimeType || FALLBACK_MIME_TYPE });
-    if (!blob.size) throw createSaveError(messageId, '下载消息媒体为空');
-    const fileName = sanitizeFileName(
-      options?.fileName || (media && getMediaFilename(media)), messageId, blob.type,
-    );
+    if (!blob.size) throw createSaveError(messageId, 'Downloaded message media is empty');
+
+    const fileName = sanitizeFileName(options?.fileName || getMediaFilename(media), messageId, blob.type);
     blobUrl = URL.createObjectURL(blob);
-    // 对象 URL 在下载队列实际点击后释放，避免点击前撤销导致文件无法保存
     await download(blobUrl, fileName, revokeUrl);
-    return { fileName, size: blob.size };
+    return { fileName, size: total || blob.size };
   } catch (err: unknown) {
-    if (err instanceof Error && err.message.startsWith(`消息 ${messageId}：`)) throw err;
-    throw createSaveError(messageId, '触发浏览器下载失败', err);
+    if (err instanceof Error && err.message.startsWith(`Message ${messageId}:`)) throw err;
+    throw createSaveError(messageId, 'Failed to trigger browser download', err);
   } finally {
     revokeUrl();
   }
@@ -125,5 +146,5 @@ function sanitizeFileName(fileName: string | undefined, messageId: string, mimeT
 }
 
 function createSaveError(messageId: string, description: string, cause?: unknown) {
-  return new Error(`消息 ${messageId}：${description}`, cause === undefined ? undefined : { cause });
+  return new Error(`Message ${messageId}: ${description}`, cause === undefined ? undefined : { cause });
 }

@@ -650,6 +650,7 @@ addActionHandler('cancelMediaDownload', (global, actions, payload): ActionReturn
   const hash = getMediaHash(media, 'download');
   if (!hash) return undefined;
 
+  cancelSaveMediaStream(hash);
   global = cancelMessageMediaDownload(global, [hash], tabId);
   return global;
 });

@@ -32,7 +32,6 @@ import {
   areReactionsEmpty,
   getCanPostInChat,
   getIsDownloading,
-  getMediaHash,
   getMessageAudio,
   getMessageVideo,
   getUserFullName,
@@ -82,7 +81,7 @@ import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
 import { isUserId } from '../../../util/entities/ids';
 import { getTranslationCacheKey, parseTranslationCacheKey } from '../../../util/keys/translationKey';
-import { save_media_stream } from '../../../util/saveMediaStream';
+import { type SaveMediaStreamRequest, saveMediaStreams } from '../../../util/saveMediaStream';
 import { getSelectionAsFormattedText } from './helpers/getSelectionAsFormattedText';
 import { isSelectionRangeInsideMessage } from './helpers/isSelectionRangeInsideMessage';
 
@@ -676,29 +675,38 @@ const ContextMenuContainer = ({
     closeMenu();
   });
 
-  /** 将媒体流保存任务接入全局下载状态，并复用下载列表进度 */
   const handleSaveMediaStream = useLastCallback(() => {
-    const media = selectMessageDownloadableMedia(getGlobal(), message);
-    const mediaHash = media && getMediaHash(media, 'download');
-    if (!media || !mediaHash) return;
+    const global = getGlobal();
+    const messages = album?.messages || [message];
+    const requests = messages.reduce<SaveMediaStreamRequest[]>((result, msg) => {
+      const media = selectMessageDownloadableMedia(global, msg);
+      if (media) {
+        result.push({ message: msg, media });
+      }
 
-    downloadMedia({ media, originMessage: message, isSaveMediaStream: true });
-    closeMenu();
-    void save_media_stream(message, {
-      mediaHash,
-      progressCallback: (downloaded, total) => {
-        const progress = total ? downloaded / total : downloaded;
+      return result;
+    }, []);
+    if (!requests.length) return;
+
+    saveMediaStreams(requests, {
+      onStart: ({ message: originMessage, media }) => {
+        downloadMedia({ media, originMessage, isSaveMediaStream: true });
+      },
+      onProgress: ({ mediaHash }, progress) => {
         updateMediaDownloadProgress({ mediaHash, progress });
       },
-    }).then(() => {
-      cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
-    }).catch(() => {
-      const isCanceled = !selectActiveDownloads(getGlobal())[mediaHash];
-      cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
-      if (!isCanceled) {
-        showNotification({ message: lang('NativeDownloadFailed') });
-      }
+      onComplete: ({ mediaHash }) => {
+        cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
+      },
+      onError: ({ mediaHash }) => {
+        const isCanceled = !selectActiveDownloads(getGlobal())[mediaHash];
+        cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
+        if (!isCanceled) {
+          showNotification({ message: lang('NativeDownloadFailed') });
+        }
+      },
     });
+    closeMenu();
   });
 
   const handleSaveGif = useLastCallback(() => {
@@ -885,7 +893,7 @@ const ContextMenuContainer = ({
         onCopyNumber={handleCopyNumber}
         onDownload={handleDownloadClick}
         onSaveMediaStream={handleSaveMediaStream}
-        hasMedia={Boolean(selectMessageDownloadableMedia(getGlobal(), message))}
+        hasMedia={canDownload}
         onSaveGif={handleSaveGif}
         onToggleMusicInProfile={handleToggleMusicInProfile}
         onCancelVote={handleCancelVote}
