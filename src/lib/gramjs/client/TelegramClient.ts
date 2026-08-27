@@ -16,6 +16,7 @@ import type { UploadFileParams } from './uploadFile';
 import Deferred from '../../../util/Deferred';
 import { concat } from '../../../util/encoding/buffer';
 import { toJSNumber } from '../../../util/numbers';
+import { getServerTimeOffset } from '../../../util/serverTime';
 import {
   FloodTestPhoneWaitError,
   FloodWaitError,
@@ -44,6 +45,7 @@ import { authFlow, checkAuthorization } from './auth';
 import { downloadFile } from './downloadFile';
 import { uploadFile } from './uploadFile';
 
+import { HttpStreamError } from '../extensions/HttpStream';
 import { generateRandomBigInt, sleep } from '../Helpers';
 import RequestState from '../network/RequestState';
 import Session from '../sessions/Abstract';
@@ -298,6 +300,7 @@ class TelegramClient {
       this._sender = new MTProtoSender(this.session.getAuthKey(), {
         logger: this._log,
         dcId: this.session.dcId,
+        timeOffset: getServerTimeOffset(),
         retries: this._connectionRetries,
         retriesToFallback: this._connectionRetriesToFallback,
         shouldForceHttpTransport: this._shouldForceHttpTransport,
@@ -484,7 +487,7 @@ class TelegramClient {
     Object.values(this._exportedSenderPromises)
       .forEach((promises) => {
         Object.values(promises).forEach((promise) => {
-          promise?.then((sender) => sender?.disconnect());
+          void promise?.then((sender) => sender?.disconnect()).catch(() => undefined);
         });
       });
 
@@ -543,16 +546,29 @@ class TelegramClient {
   // endregion
   // export region
 
+  /**
+   * 清理指定数据中心的导出 Sender，并避免旧连接覆盖新一轮连接状态
+   */
   async _cleanupExportedSender(dcId: number, index: number) {
     if (this.session.dcId !== dcId) {
       this.session.setAuthKey(undefined, dcId);
     }
     // eslint-disable-next-line no-console
     if (this._shouldDebugExportedSenders) console.log(`🧹 Cleanup idx=${index} dcId=${dcId}`);
-    const sender = await this._exportedSenderPromises[dcId][index];
-    delete this._exportedSenderPromises[dcId][index];
-    delete this._exportedSenderRefCounter[dcId][index];
+    const senderPromise = this._exportedSenderPromises[dcId][index];
+    const sender = await senderPromise?.catch(() => undefined);
     sender?.disconnect();
+
+    // 连接断开回调可能晚于下一轮连接完成，只能清理仍属于当前 Sender 的状态
+    if (this._exportedSenderPromises[dcId][index] === senderPromise) {
+      const releaseTimeout = this._exportedSenderReleaseTimeouts[dcId]?.[index];
+      if (releaseTimeout) {
+        clearTimeout(releaseTimeout);
+        this._exportedSenderReleaseTimeouts[dcId][index] = undefined;
+      }
+      delete this._exportedSenderPromises[dcId][index];
+      delete this._exportedSenderRefCounter[dcId][index];
+    }
   }
 
   async _cleanupExportedSenders(dcId: number) {
@@ -569,11 +585,14 @@ class TelegramClient {
     this._exportedSenderRefCounter[dcId] = {};
 
     await Promise.all(promises.map(async (promise) => {
-      const sender = await promise;
+      const sender = await promise?.catch(() => undefined);
       sender?.disconnect();
     }));
   }
 
+  /**
+   * 连接导出 Sender，并在需要时完成跨数据中心授权
+   */
   async _connectSender(sender: MTProtoSender, dcId: number, index?: number, isPremium = false) {
     // if we don't already have an auth key we want to use normal DCs not -1
     let hasAuthKey = Boolean(sender.authKey.getKey());
@@ -584,10 +603,11 @@ class TelegramClient {
         await this._waitingForAuthKey[dcId];
 
         const authKey = this.session.getAuthKey(dcId);
+        const replacementKey = authKey?.getKey();
 
-        hasAuthKey = Boolean(sender.authKey?.getKey());
+        hasAuthKey = Boolean(replacementKey);
         if (hasAuthKey) {
-          await sender.authKey.setKey(authKey.getKey());
+          await sender.authKey.setKey(replacementKey);
         }
       } else {
         this._waitingForAuthKey[dcId] = new Promise((resolve) => {
@@ -596,9 +616,8 @@ class TelegramClient {
       }
     }
 
-    const dc = getDC(dcId, hasAuthKey);
-
     while (true) {
+      const dc = getDC(dcId, hasAuthKey);
       try {
         await sender.connect(new this._connection({
           ip: dc.ipAddress,
@@ -619,7 +638,7 @@ class TelegramClient {
 
         if (this.session.dcId !== dcId && !sender._authenticated) {
           // Prevent another connection from trying to export the auth key while we're doing it
-          await navigator.locks.request('GRAMJS_AUTH_EXPORT', async () => {
+          const importAuthorization = async () => {
             this._log.info(`Exporting authorization for data center ${dc.ipAddress}`);
             const auth = await this.invoke(new Api.auth.ExportAuthorization({ dcId }));
 
@@ -629,7 +648,14 @@ class TelegramClient {
             }));
             await sender.send(req);
             sender._authenticated = true;
-          });
+          };
+
+          // Web Locks 只在安全上下文中可用，局域网 HTTP 需要直接执行授权流程
+          if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+            await navigator.locks.request('GRAMJS_AUTH_EXPORT', importAuthorization);
+          } else {
+            await importAuthorization();
+          }
         }
 
         sender._dcId = dcId;
@@ -647,6 +673,30 @@ class TelegramClient {
 
         return sender;
       } catch (err: any) {
+        if (err instanceof HttpStreamError && err.status === 404 && this.session.dcId !== dcId) {
+          const pendingAuthKey = this._waitingForAuthKey[dcId];
+          if (pendingAuthKey && !firstConnectResolver) {
+            await pendingAuthKey;
+            const authKey = this.session.getAuthKey(dcId);
+            const replacementKey = authKey?.getKey();
+            if (replacementKey && authKey !== sender.authKey) {
+              await sender.authKey.setKey(replacementKey);
+            }
+            hasAuthKey = Boolean(sender.authKey.getKey());
+          } else if (sender.authKey.getKey()) {
+            if (!firstConnectResolver) {
+              this._waitingForAuthKey[dcId] = new Promise((resolve) => {
+                firstConnectResolver = resolve;
+              });
+            }
+
+            await sender.authKey.setKey(undefined);
+            this.session.setAuthKey(undefined, dcId);
+            sender._authenticated = false;
+            hasAuthKey = false;
+          }
+        }
+
         if (this._shouldDebugExportedSenders) {
           // eslint-disable-next-line no-console
           console.error(`☠️ ERROR! idx=${index} dcId=${dcId} ${err.message}`);
@@ -656,6 +706,9 @@ class TelegramClient {
 
         await sleep(1000);
         sender.disconnect();
+        if (err instanceof HttpStreamError && err.status === 404 && this.session.dcId === dcId && hasAuthKey) {
+          throw err;
+        }
       }
     }
   }
@@ -682,6 +735,9 @@ class TelegramClient {
     }
   }
 
+  /**
+   * 借用可用的导出 Sender，并在连接失败后创建全新的连接 Promise
+   */
   async _borrowExportedSender(
     dcId: number, shouldReconnect?: boolean, existingSender?: MTProtoSender, index?: number, isPremium?: boolean,
   ): Promise<MTProtoSender> {
@@ -710,8 +766,9 @@ class TelegramClient {
     }
 
     let sender;
+    const senderPromise = this._exportedSenderPromises[dcId][i];
     try {
-      sender = await this._exportedSenderPromises[dcId][i];
+      sender = await senderPromise;
 
       if (!sender?.isConnected()) {
         if (sender?.isConnecting) {
@@ -724,6 +781,11 @@ class TelegramClient {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(err);
+
+      // 失败 Promise 不能继续参与下一次借用，否则会重复触发同一个断线错误
+      if (this._exportedSenderPromises[dcId][i] === senderPromise) {
+        this._exportedSenderPromises[dcId][i] = undefined;
+      }
 
       return this._borrowExportedSender(dcId, true, undefined, i, isPremium);
     }
@@ -748,6 +810,7 @@ class TelegramClient {
       logger: this._log,
       dcId,
       senderIndex: index,
+      timeOffset: getServerTimeOffset(),
       retries: this._connectionRetries,
       retriesToFallback: this._connectionRetriesToFallback,
       delay: this._retryDelay,

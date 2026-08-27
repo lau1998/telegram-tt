@@ -23,12 +23,14 @@ type OwnProps = {
   trigger?: FC<{ onTrigger: () => void; isOpen?: boolean }>;
   shouldHideSearch?: boolean;
   className?: string;
+  onSelectDownloads?: NoneToVoidFunction;
 };
 
 const LeftSideMenuDropdown = ({
   trigger,
   shouldHideSearch,
   className,
+  onSelectDownloads,
 }: OwnProps) => {
   const {
     openLeftColumnContent, closeForumPanel, closeCommunityPanel, openSettingsScreen,
@@ -81,6 +83,7 @@ const LeftSideMenuDropdown = ({
         onSelectSettings={handleSelectSettings}
         onBotMenuOpened={markBotMenuOpen}
         onBotMenuClosed={unmarkBotMenuOpen}
+        onSelectDownloads={onSelectDownloads}
         footer={`${APP_NAME} ${versionString}`}
       />
     </DropdownMenu>

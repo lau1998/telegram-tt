@@ -2,7 +2,7 @@ import { memo, useMemo } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiUser } from '../../../api/types';
-import type { GlobalState } from '../../../global/types';
+import type { GlobalState, TabState } from '../../../global/types';
 import type { AnimationLevel, ThemeKey } from '../../../types';
 
 import {
@@ -41,12 +41,15 @@ import Switcher from '../../ui/Switcher';
 import Toggle from '../../ui/Toggle';
 import AccountMenuItems from './AccountMenuItems';
 
+const MAX_DOWNLOAD_BADGE_COUNT = 9;
+
 type OwnProps = {
   onSelectSettings: NoneToVoidFunction;
   onSelectContacts: NoneToVoidFunction;
   onSelectArchived: NoneToVoidFunction;
   onBotMenuOpened: NoneToVoidFunction;
   onBotMenuClosed: NoneToVoidFunction;
+  onSelectDownloads?: NoneToVoidFunction;
   footer?: string;
 };
 
@@ -57,6 +60,7 @@ type StateProps = {
   canInstall?: boolean;
   attachBots: GlobalState['attachMenu']['bots'];
   accountsTotalLimit: number;
+  activeDownloads: TabState['activeDownloads'];
 } & Pick<GlobalState, 'currentUserId' | 'archiveSettings'>;
 
 const LeftSideMenuItems = ({
@@ -68,11 +72,13 @@ const LeftSideMenuItems = ({
   attachBots,
   currentUser,
   accountsTotalLimit,
+  activeDownloads,
   onSelectArchived,
   onSelectContacts,
   onSelectSettings,
   onBotMenuOpened,
   onBotMenuClosed,
+  onSelectDownloads,
   footer,
 }: OwnProps & StateProps) => {
   const {
@@ -93,6 +99,7 @@ const LeftSideMenuItems = ({
   const archivedUnreadChatsCount = useFolderManagerForUnreadCounters()[ARCHIVED_FOLDER_ID]?.chatsCount || 0;
 
   const bots = useMemo(() => Object.values(attachBots).filter((bot) => bot.isForSideMenu), [attachBots]);
+  const downloadCount = Object.keys(activeDownloads).length;
 
   const handleSelectMyProfile = useLastCallback(() => {
     openChatWithInfo({ id: currentUserId, shouldReplaceHistory: true, isOwnProfile: true });
@@ -166,6 +173,14 @@ const LeftSideMenuItems = ({
       >
         {lang('MenuSavedMessages')}
       </MenuItem>
+      {downloadCount > 0 && onSelectDownloads && (
+        <MenuItem icon="download" onClick={onSelectDownloads}>
+          <span className="menu-item-name">{lang('MediaDownload')}</span>
+          <div className="right-badge">
+            {downloadCount > MAX_DOWNLOAD_BADGE_COUNT ? `${MAX_DOWNLOAD_BADGE_COUNT}+` : downloadCount}
+          </div>
+        </MenuItem>
+      )}
       {archiveSettings.isHidden && (
         <MenuItem
           icon="archive"
@@ -289,6 +304,7 @@ export default memo(withGlobal<OwnProps>(
       archiveSettings,
       attachBots,
       accountsTotalLimit: selectPremiumLimit(global, 'moreAccounts'),
+      activeDownloads: tabState.activeDownloads,
     };
   },
 )(LeftSideMenuItems));

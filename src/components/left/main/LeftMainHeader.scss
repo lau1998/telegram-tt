@@ -90,6 +90,27 @@
     }
   }
 
+  // 下载数量徽标固定在左上角菜单按钮右上方
+  .download-count-badge {
+    position: absolute;
+    z-index: 1;
+    top: -0.25rem;
+    right: -0.25rem;
+
+    min-width: 1.125rem;
+    height: 1.125rem;
+    padding: 0 0.25rem;
+    border-radius: 0.5625rem;
+
+    font-size: 0.6875rem;
+    font-weight: var(--font-weight-semibold);
+    line-height: 1.125rem;
+    color: white;
+    text-align: center;
+
+    background: var(--color-primary);
+  }
+
   .hide-menu-button {
     overflow: hidden;
     width: 0;

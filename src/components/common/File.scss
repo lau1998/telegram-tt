@@ -188,6 +188,12 @@
     text-overflow: ellipsis;
   }
 
+  .file-progress-percent {
+    margin-inline-start: 0.25rem;
+    font-weight: var(--font-weight-medium);
+    color: var(--secondary-color);
+  }
+
   .bullet {
     padding-inline: 0.25rem;
   }

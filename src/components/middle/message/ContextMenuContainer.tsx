@@ -270,6 +270,8 @@ const ContextMenuContainer = ({
     rescheduleMessage,
     downloadMedia,
     cancelMediaDownload,
+    cancelMediaHashDownloads,
+    updateMediaDownloadProgress,
     loadSeenBy,
     openSeenByModal,
     openReactorListModal,
@@ -674,13 +676,28 @@ const ContextMenuContainer = ({
     closeMenu();
   });
 
-  /** 直接保存当前媒体消息流，绕过全局媒体缓存下载状态 */
+  /** 将媒体流保存任务接入全局下载状态，并复用下载列表进度 */
   const handleSaveMediaStream = useLastCallback(() => {
     const media = selectMessageDownloadableMedia(getGlobal(), message);
     const mediaHash = media && getMediaHash(media, 'download');
+    if (!media || !mediaHash) return;
+
+    downloadMedia({ media, originMessage: message, isSaveMediaStream: true });
     closeMenu();
-    void save_media_stream(message, { mediaHash }).catch(() => {
-      showNotification({ message: lang('NativeDownloadFailed') });
+    void save_media_stream(message, {
+      mediaHash,
+      progressCallback: (downloaded, total) => {
+        const progress = total ? downloaded / total : downloaded;
+        updateMediaDownloadProgress({ mediaHash, progress });
+      },
+    }).then(() => {
+      cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
+    }).catch(() => {
+      const isCanceled = !selectActiveDownloads(getGlobal())[mediaHash];
+      cancelMediaHashDownloads({ mediaHashes: [mediaHash] });
+      if (!isCanceled) {
+        showNotification({ message: lang('NativeDownloadFailed') });
+      }
     });
   });
 

@@ -8,6 +8,7 @@ import {
 } from '../../api/types';
 
 import { NSFW_RESTRICTION_REASON } from '../../config';
+import { getCurrentTabId } from '../../util/establishMultitabRole';
 import {
   getMessageAudio,
   getMessageContent,
@@ -33,6 +34,14 @@ import {
 } from './messages';
 import { selectSettingsKeys } from './settings';
 import { selectAnimatedEmoji, selectCustomEmoji } from './symbols';
+import { selectTabState } from './tabs';
+
+/**
+ * 返回指定媒体下载任务的全局进度
+ */
+export function selectMediaDownloadProgress<T extends GlobalState>(global: T, mediaHash: string) {
+  return selectTabState(global, getCurrentTabId()).activeDownloads[mediaHash]?.progress;
+}
 
 export function selectIsMediaNsfw<T extends GlobalState>(global: T, message: ApiMessage) {
   const { isSensitiveEnabled } = selectSettingsKeys(global);

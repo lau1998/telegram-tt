@@ -48,6 +48,7 @@ type OwnProps = {
   isAccountFrozen?: boolean;
   onReset: () => void;
   isFoldersSidebarShown?: boolean;
+  onSelectDownloads: NoneToVoidFunction;
 };
 
 const TRANSITION_RENDER_COUNT = Object.keys(LeftColumnContent).length / 2;
@@ -71,6 +72,7 @@ const LeftMain: FC<OwnProps> = ({
   onTopicSearch,
   isAccountFrozen,
   isFoldersSidebarShown,
+  onSelectDownloads,
 }) => {
   const { openLeftColumnContent } = getActions();
   const [isNewChatButtonShown, setIsNewChatButtonShown] = useState(IS_TOUCH_ENV);
@@ -207,6 +209,7 @@ const LeftMain: FC<OwnProps> = ({
         shouldSkipTransition={shouldSkipTransition}
         isClosingSearch={isClosingSearch}
         isFoldersSidebarShown={isFoldersSidebarShown}
+        onSelectDownloads={onSelectDownloads}
       />
       <Transition
         name={shouldSkipTransition ? 'none' : 'zoomFade'}

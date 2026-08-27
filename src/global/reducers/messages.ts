@@ -804,6 +804,34 @@ export function addActiveMediaDownload<T extends GlobalState>(
   return global;
 }
 
+/**
+ * 更新现有媒体下载任务的进度
+ */
+export function updateActiveMediaDownloadProgress<T extends GlobalState>(
+  global: T,
+  mediaHash: string,
+  progress: number,
+  ...[tabId = getCurrentTabId()]: TabArgs<T>
+) {
+  const tabState = selectTabState(global, tabId);
+  const activeDownload = tabState.activeDownloads[mediaHash];
+  if (!activeDownload) {
+    return global;
+  }
+
+  const normalizedProgress = Math.min(1, Math.max(0, progress));
+
+  return updateTabState(global, {
+    activeDownloads: {
+      ...tabState.activeDownloads,
+      [mediaHash]: {
+        ...activeDownload,
+        progress: normalizedProgress,
+      },
+    },
+  }, tabId);
+}
+
 export function cancelMessageMediaDownload<T extends GlobalState>(
   global: T,
   mediaHashes: string[],

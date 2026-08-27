@@ -1,4 +1,4 @@
-import type { ApiMessage } from '../api/types';
+import type { ApiMessage, ApiOnProgress } from '../api/types';
 import { ApiMediaFormat } from '../api/types';
 
 import {
@@ -12,11 +12,12 @@ import {
   getMessageVideo,
   getMessageVoice,
 } from '../global/helpers/messageMedia';
-import { callApi } from '../api/gramjs';
+import { callApi, cancelApiProgress } from '../api/gramjs';
 import download from './download';
 
 const MAX_DOWNLOAD_ATTEMPTS = 3;
 const FALLBACK_MIME_TYPE = 'application/octet-stream';
+const activeProgressCallbacks = new Map<string, ApiOnProgress>();
 
 /** 描述媒体流保存时可选的文件名、媒体 hash 和下载进度回调 */
 export type SaveMediaStreamOptions = {
@@ -24,6 +25,15 @@ export type SaveMediaStreamOptions = {
   mediaHash?: string;
   progressCallback?: (downloaded: number, total?: number) => void;
 };
+
+/** 取消指定媒体的流式保存请求 */
+export function cancelSaveMediaStream(mediaHash: string) {
+  const progressCallback = activeProgressCallbacks.get(mediaHash);
+  if (!progressCallback) return;
+
+  cancelApiProgress(progressCallback);
+  activeProgressCallbacks.delete(mediaHash);
+}
 
 /** 通过 UI API 下载消息媒体并保存到浏览器默认下载目录 */
 export async function save_media_stream(
@@ -47,6 +57,11 @@ export async function save_media_stream(
   const total = media && 'size' in media ? media.size : undefined;
 
   let result: Awaited<ReturnType<typeof callApi<'downloadMedia'>>>;
+  const progressCallback: ApiOnProgress = (progress) => {
+    options?.progressCallback?.(total ? progress * total : progress, total);
+  };
+  activeProgressCallbacks.set(mediaHash, progressCallback);
+
   // 下载错误最多重试三次，避免网络抖动导致保存流程无限等待
   for (let attempt = 0; attempt < MAX_DOWNLOAD_ATTEMPTS; attempt++) {
     try {
@@ -54,16 +69,17 @@ export async function save_media_stream(
         url: mediaHash,
         mediaFormat: ApiMediaFormat.BlobUrl,
         isHtmlAllowed: false,
-      }, (progress) => {
-        options?.progressCallback?.(total ? progress * total : progress, total);
-      });
+      }, progressCallback);
       break;
     } catch (err: unknown) {
       if (attempt === MAX_DOWNLOAD_ATTEMPTS - 1) {
+        activeProgressCallbacks.delete(mediaHash);
         throw createSaveError(messageId, '下载消息媒体失败', err);
       }
     }
   }
+
+  activeProgressCallbacks.delete(mediaHash);
 
   if (!result?.dataBlob) throw createSaveError(messageId, '下载消息媒体为空');
   let blob: Blob;

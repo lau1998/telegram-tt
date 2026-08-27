@@ -153,7 +153,7 @@ const File = ({
             <ProgressSpinner
               progress={transferProgress}
               size={previewSize === 'small' ? 's' : 'm'}
-              onClick={isUploading ? onClick : undefined}
+              onClick={isTransferring ? onClick : undefined}
             />
           </div>
         )}
@@ -168,6 +168,12 @@ const File = ({
         <div className="file-title" dir="auto" title={name}>{renderText(name)}</div>
         <div className="file-subtitle" dir="auto">
           <AnimatedFileSize size={size} progress={isTransferring ? transferProgress : undefined} />
+          {isTransferring && !isUploading && (
+            <span className="file-progress-percent">
+              {Math.round((transferProgress || 0) * 100)}
+              %
+            </span>
+          )}
           {sender && (
             <>
               <span className="bullet">&bull;</span>

@@ -47,6 +47,7 @@ import useInterval from '../../hooks/schedulers/useInterval';
 import useTimeout from '../../hooks/schedulers/useTimeout';
 import useTauriEvent from '../../hooks/tauri/useTauriEvent';
 import useAppLayout from '../../hooks/useAppLayout';
+import useFlag from '../../hooks/useFlag';
 import useForceUpdate from '../../hooks/useForceUpdate';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
@@ -557,6 +558,8 @@ const Main = ({
     onTabFocusChange({ isBlurred: true });
   });
 
+  const [isDownloadPanelOpen, openDownloadPanel, closeDownloadPanel] = useFlag();
+
   const handleFocus = useLastCallback(() => {
     onTabFocusChange({ isBlurred: false });
 
@@ -610,7 +613,11 @@ const Main = ({
       bgClassName={bgClassName}
     >
       <FoldersSidebar isMobile={isMobile} isActive={isFoldersSidebarShown} />
-      <LeftColumn ref={leftColumnRef} isFoldersSidebarShown={isFoldersSidebarShown} />
+      <LeftColumn
+        ref={leftColumnRef}
+        isFoldersSidebarShown={isFoldersSidebarShown}
+        onSelectDownloads={openDownloadPanel}
+      />
       <MiddleColumn
         leftColumnRef={leftColumnRef}
         isMobile={isMobile}
@@ -642,7 +649,7 @@ const Main = ({
         isByPhoneNumber={newContactByPhoneNumber}
       />
       <GameModal openedGame={openedGame} gameTitle={gameTitle} />
-      <DownloadManager />
+      <DownloadManager isOpen={isDownloadPanelOpen} onClose={closeDownloadPanel} />
       <ConfettiContainer />
       {IS_WAVE_TRANSFORM_SUPPORTED && <WaveContainer />}
       <SnapEffectContainer />

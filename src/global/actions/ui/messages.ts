@@ -16,6 +16,7 @@ import { copyTextToClipboardFromPromise } from '../../../util/clipboard';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { compact, findLast } from '../../../util/iteratees';
 import { Bundles, loadBundle } from '../../../util/moduleLoader';
+import { cancelSaveMediaStream } from '../../../util/saveMediaStream';
 import {
   getMediaFilename,
   getMediaFormat,
@@ -31,6 +32,7 @@ import {
   enterMessageSelectMode,
   exitMessageSelectMode,
   toggleMessageSelection,
+  updateActiveMediaDownloadProgress,
   updateChatMessage,
   updateFocusedMessage,
 } from '../../reducers';
@@ -655,13 +657,22 @@ addActionHandler('cancelMediaDownload', (global, actions, payload): ActionReturn
 addActionHandler('cancelMediaHashDownloads', (global, actions, payload): ActionReturnType => {
   const { mediaHashes, tabId = getCurrentTabId() } = payload;
 
+  mediaHashes.forEach(cancelSaveMediaStream);
   global = cancelMessageMediaDownload(global, mediaHashes, tabId);
 
   return global;
 });
 
+addActionHandler('updateMediaDownloadProgress', (global, actions, payload): ActionReturnType => {
+  const { mediaHash, progress, tabId = getCurrentTabId() } = payload;
+
+  return updateActiveMediaDownloadProgress(global, mediaHash, progress, tabId);
+});
+
 addActionHandler('downloadMedia', (global, actions, payload): ActionReturnType => {
-  const { media, originMessage, tabId = getCurrentTabId() } = payload;
+  const {
+    media, originMessage, isSaveMediaStream, tabId = getCurrentTabId(),
+  } = payload;
 
   const hash = getMediaHash(media, 'download');
   if (!hash) return undefined;
@@ -671,6 +682,7 @@ addActionHandler('downloadMedia', (global, actions, payload): ActionReturnType =
     size,
     format: getMediaFormat(media, 'download'),
     filename: getMediaFilename(media),
+    isSaveMediaStream,
     originChatId: originMessage?.chatId,
     originMessageId: originMessage?.id,
   } satisfies ActiveDownloads[string];

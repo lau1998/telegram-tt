@@ -605,6 +605,8 @@ export type ActiveDownloads = Record<string, {
   format: ApiMediaFormat;
   filename: string;
   size: number;
+  progress?: number;
+  isSaveMediaStream?: boolean;
   originChatId?: string;
   originMessageId?: number;
 }>;

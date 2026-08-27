@@ -1965,12 +1965,17 @@ export interface ActionPayloads {
   downloadMedia: {
     media: DownloadableMedia;
     originMessage?: ApiMessage;
+    isSaveMediaStream?: boolean;
   } & WithTabId;
   cancelMediaDownload: {
     media: DownloadableMedia;
   } & WithTabId;
   cancelMediaHashDownloads: {
     mediaHashes: string[];
+  } & WithTabId;
+  updateMediaDownloadProgress: {
+    mediaHash: string;
+    progress: number;
   } & WithTabId;
 
   // Users

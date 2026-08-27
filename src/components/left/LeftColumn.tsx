@@ -41,6 +41,7 @@ import './LeftColumn.scss';
 interface OwnProps {
   ref: ElementRef<HTMLDivElement>;
   isFoldersSidebarShown: boolean;
+  onSelectDownloads: NoneToVoidFunction;
 }
 
 type StateProps = {
@@ -104,6 +105,7 @@ function LeftColumn({
   isAccountFrozen,
   hasProfileBackground,
   isFoldersSidebarShown,
+  onSelectDownloads,
 }: OwnProps & StateProps) {
   const {
     setGlobalSearchQuery,
@@ -562,6 +564,7 @@ function LeftColumn({
             onTopicSearch={handleTopicSearch}
             isAccountFrozen={isAccountFrozen}
             isFoldersSidebarShown={isFoldersSidebarShown}
+            onSelectDownloads={onSelectDownloads}
           />
         );
     }

@@ -4,7 +4,7 @@ import {
 } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
-import type { GlobalState } from '../../../global/types';
+import type { GlobalState, TabState } from '../../../global/types';
 import type { ThemeKey } from '../../../types';
 import { LeftColumnContent, SettingsScreens } from '../../../types';
 
@@ -51,6 +51,7 @@ type OwnProps = {
   isFoldersSidebarShown?: boolean;
   onSearchQuery: (query: string) => void;
   onReset: NoneToVoidFunction;
+  onSelectDownloads: NoneToVoidFunction;
 };
 
 type StateProps = {
@@ -66,10 +67,12 @@ type StateProps = {
   hasPasscode?: boolean;
   canSetPasscode?: boolean;
   isForumPanelOpen?: boolean;
+  activeDownloads: TabState['activeDownloads'];
 } & Pick<GlobalState, 'connectionState' | 'isSyncing' | 'isFetchingDifference'>;
 
 const CLEAR_DATE_SEARCH_PARAM = { date: undefined };
 const CLEAR_CHAT_SEARCH_PARAM = { id: undefined };
+const MAX_DOWNLOAD_BADGE_COUNT = 9;
 
 const IS_WITH_WINDOW_BUTTONS = IS_TAURI && IS_MAC_OS;
 
@@ -95,6 +98,8 @@ const LeftMainHeader = ({
   canSetPasscode,
   isFoldersSidebarShown,
   isForumPanelOpen,
+  activeDownloads,
+  onSelectDownloads,
   onSearchQuery,
   onReset,
 }: OwnProps & StateProps) => {
@@ -116,6 +121,7 @@ const LeftMainHeader = ({
   const hasMenu = content === LeftColumnContent.ChatList;
 
   const isSearchButton = isForumPanelOpen && isFoldersSidebarShown && !IS_WITH_WINDOW_BUTTONS;
+  const downloadCount = Object.keys(activeDownloads).length;
 
   const selectedSearchDate = useMemo(() => {
     return searchDate
@@ -175,9 +181,14 @@ const LeftMainHeader = ({
           )}
           />
         )}
+        {downloadCount > 0 && (
+          <span className="download-count-badge">
+            {downloadCount > MAX_DOWNLOAD_BADGE_COUNT ? `${MAX_DOWNLOAD_BADGE_COUNT}+` : downloadCount}
+          </span>
+        )}
       </Button>
     );
-  }, [hasMenu, isSearchButton, isMobile, lang, onReset, shouldSkipTransition]);
+  }, [hasMenu, isSearchButton, isMobile, lang, onReset, shouldSkipTransition, downloadCount]);
 
   const handleSearchFocus = useLastCallback(() => {
     if (!searchQuery) {
@@ -255,6 +266,7 @@ const LeftMainHeader = ({
         {lang.isRtl && <div className="DropdownMenuFiller" />}
         <MainMenuDropdown
           trigger={MainButton}
+          onSelectDownloads={onSelectDownloads}
           className={buildClassName(
             hasMenu && isFoldersSidebarShown && !IS_WITH_WINDOW_BUTTONS && !isSearchButton && 'hide-menu-button',
             isSearchButton && 'forum-search-button',
@@ -345,6 +357,7 @@ export default memo(withGlobal<OwnProps>(
       hasPasscode: Boolean(global.passcode.hasPasscode),
       canSetPasscode: selectCanSetPasscode(global),
       isForumPanelOpen,
+      activeDownloads: tabState.activeDownloads,
     };
   },
 )(LeftMainHeader));

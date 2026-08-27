@@ -4,7 +4,7 @@ import {
 
 import { ApiMediaFormat } from '../api/types';
 
-import { selectIsSynced } from '../global/selectors';
+import { selectActiveDownloads, selectIsSynced } from '../global/selectors';
 import { IS_PROGRESSIVE_SUPPORTED } from '../util/browser/windowEnvironment';
 import * as mediaLoader from '../util/mediaLoader';
 import useSelector from './data/useSelector';
@@ -30,6 +30,7 @@ export default function useMediaWithLoadProgress(
 
   const forceUpdate = useForceUpdate();
   const isSynced = useSelector(selectIsSynced);
+  const activeDownloads = useSelector(selectActiveDownloads);
   const id = useUniqueId();
   const [loadProgress, setLoadProgress] = useState(mediaData && !isStreaming ? 1 : 0);
   const startedAtRef = useRef<number>();
@@ -87,5 +88,10 @@ export default function useMediaWithLoadProgress(
     };
   }, [id, mediaHash]);
 
-  return { mediaData, loadProgress };
+  const globalProgress = mediaHash ? activeDownloads[mediaHash]?.progress : undefined;
+  const unifiedProgress = globalProgress === undefined
+    ? loadProgress
+    : Math.max(loadProgress, globalProgress);
+
+  return { mediaData, loadProgress: unifiedProgress };
 }

@@ -15,8 +15,9 @@ import { AuthKey } from '../crypto/AuthKey';
 import {
   BadMessageError, InvalidBufferError, MessageReplayError, SecurityError, TypeNotFoundError,
 } from '../errors/Common';
+import { HttpStreamError } from '../extensions/HttpStream';
 import PendingState from '../extensions/PendingState';
-import { jsonStringifyWithBigInt, sleep } from '../Helpers';
+import { generateRandomLong, jsonStringifyWithBigInt, sleep } from '../Helpers';
 import MessageContainer from '../tl/core/MessageContainer';
 import { doAuthentication } from './Authenticator';
 import {
@@ -39,6 +40,13 @@ const MAX_RECENT_ACKNOWLEDGED_MESSAGES = 500;
 const MESSAGE_STATE_RECEIVED = 4;
 const MESSAGE_STATE_NO_ACK_REQUIRED = 16;
 const MESSAGE_STATE_RECEIVED_ELSEWHERE = 128;
+const MAIN_CONNECTION_RETRY_DELAY_MULTIPLIERS = [1, 3, 6, 30, 60];
+const MAX_MAIN_CONNECTION_RETRY_DELAY = 600000;
+const SERVER_SALT_REFRESH_MARGIN = 60;
+const SERVER_SALT_REQUEST_RETRY_DELAY = 60000;
+const MILLISECONDS_PER_SECOND = 1000;
+const TRANSPORT_CODE_LENGTH = 4;
+const MESSAGE_ID_TOO_HIGH_ERROR_CODE = 17;
 
 type SentMessage = {
   msgId: bigint;
@@ -62,6 +70,7 @@ interface DefaultOptions {
   delay: number;
   dcId: number;
   senderIndex?: number;
+  timeOffset?: number;
   autoReconnect: boolean;
   shouldForceHttpTransport: boolean;
   shouldAllowHttpTransport: boolean;
@@ -185,6 +194,12 @@ export default class MTProtoSender {
 
   private _isReconnectingToMain = false;
 
+  private futureServerSaltRefreshTimer?: ReturnType<typeof setTimeout>;
+
+  private futureServerSaltRequest?: Promise<Api.TypeFutureSalts | undefined>;
+
+  private hasHandledHttpAuthKeyError = false;
+
   readonly authKey: AuthKey;
 
   private readonly _state: MTProtoState;
@@ -257,6 +272,7 @@ export default class MTProtoSender {
      */
     this.authKey = authKey || new AuthKey();
     this._state = new MTProtoState(this.authKey, this._log);
+    this._state.timeOffset = args.timeOffset ?? 0;
 
     /**
      * Outgoing messages are put in a queue and sent in a batch.
@@ -356,8 +372,11 @@ export default class MTProtoSender {
       && this._shouldAllowHttpTransport);
     this._connection = connection;
     this._fallbackConnection = fallbackConnection;
+    let hasConnected = false;
+    let connectionError: unknown;
 
     for (let attempt = 0; attempt < this._retries + this._retriesToFallback; attempt++) {
+      const hasAuthKey = Boolean(this.authKey.getKey());
       try {
         if (attempt >= this._retriesToFallback && this._shouldAllowHttpTransport) {
           this._isFallback = true;
@@ -370,8 +389,14 @@ export default class MTProtoSender {
         if (!this._isExported) {
           this._updateCallback?.(new UpdateConnectionState(UpdateConnectionState.connected));
         }
+        hasConnected = true;
         break;
       } catch (err) {
+        connectionError = err;
+        if (this.shouldResetHttpAuthKey(err, hasAuthKey)) {
+          if (!this._isExported) this._handleBadAuthKey();
+          break;
+        }
         if (!this._isExported && attempt === 0) {
           this._updateCallback?.(new UpdateConnectionState(UpdateConnectionState.disconnected));
         }
@@ -382,8 +407,11 @@ export default class MTProtoSender {
       }
     }
     this.isConnecting = false;
+    if (!hasConnected) {
+      throw connectionError instanceof Error ? connectionError : new Error('Connection failed');
+    }
 
-    if (this._isFallback && !this._shouldForceHttpTransport && !shouldUseFallback) {
+    if (this._isFallback && !this._shouldForceHttpTransport) {
       void this.tryReconnectToMain();
     }
 
@@ -391,31 +419,56 @@ export default class MTProtoSender {
   }
 
   async tryReconnectToMain() {
-    if (!this.isConnecting && this._isFallback && !this._isReconnectingToMain && !this.isReconnecting
-      && !this._shouldForceHttpTransport && !this._isExported) {
-      this._log.debug('Trying to reconnect to main connection');
-      this._isReconnectingToMain = true;
-      try {
-        await this._connection!.connect();
-        this._log.info('Reconnected to main connection');
-        this.logWithIndex.warn('Reconnected to main connection');
-        this.isReconnecting = true;
-        if (this._fallbackConnection) this._disconnect(this._fallbackConnection);
-        await this.connect(this._connection!, true, this._fallbackConnection);
-        this.isReconnecting = false;
-        this._isReconnectingToMain = false;
-      } catch (e) {
-        this.isReconnecting = false;
-        this._isReconnectingToMain = false;
-        this._log.error(
-          `Failed to reconnect to main connection, retrying in ${this._retryMainConnectionDelay}ms`,
+    if (this._isReconnectingToMain || !this.canRetryMainConnection()) return;
+
+    this._isReconnectingToMain = true;
+    let attempt = 0;
+
+    try {
+      while (this.canRetryMainConnection()) {
+        const delayMultiplier = MAIN_CONNECTION_RETRY_DELAY_MULTIPLIERS[
+          Math.min(attempt, MAIN_CONNECTION_RETRY_DELAY_MULTIPLIERS.length - 1)
+        ];
+        const retryDelay = Math.min(
+          this._retryMainConnectionDelay * delayMultiplier,
+          MAX_MAIN_CONNECTION_RETRY_DELAY,
         );
-        await sleep(this._retryMainConnectionDelay);
-        void this.tryReconnectToMain();
+        this._log.debug(`Trying to reconnect to main connection in ${retryDelay}ms`);
+        await sleep(retryDelay);
+
+        if (!this.canRetryMainConnection()) return;
+
+        try {
+          await this._connection!.connect();
+          this.isReconnecting = true;
+          if (this._fallbackConnection) this._disconnect(this._fallbackConnection);
+          await this.connect(this._connection!, true, this._fallbackConnection);
+          this.isReconnecting = false;
+
+          if (this._isFallback) {
+            this._log.error('Failed to reconnect to main connection');
+            attempt++;
+            continue;
+          }
+
+          this._log.info('Reconnected to main connection');
+          this.logWithIndex.warn('Reconnected to main connection');
+          return;
+        } catch {
+          this.isReconnecting = false;
+          this._isFallback = true;
+          this._log.error('Failed to reconnect to main connection');
+          attempt++;
+        }
       }
-    } else {
-      await sleep(this._retryMainConnectionDelay);
+    } finally {
+      this._isReconnectingToMain = false;
     }
+  }
+
+  private canRetryMainConnection() {
+    return !this.userDisconnected && !this.isConnecting && this._isFallback && !this.isReconnecting
+      && !this._shouldForceHttpTransport && !this._isExported;
   }
 
   isConnected() {
@@ -532,6 +585,7 @@ export default class MTProtoSender {
    */
   async _connect(connection: Connection) {
     const wasReconnecting = this.isReconnecting;
+    const shouldCheckHttpConnection = connection instanceof HttpConnection && Boolean(this.authKey.getKey());
 
     if (!connection.isConnected()) {
       this._log.info('Connecting to {0}...'.replace('{0}', connection._ip));
@@ -546,6 +600,7 @@ export default class MTProtoSender {
       this._log.debug('Generated new auth_key successfully');
       await this.authKey.setKey(res.authKey);
 
+      this._state.resetForNewAuthKey();
       this._state.timeOffset = res.timeOffset;
       this._state.setServerSalt(res.serverSalt);
 
@@ -566,6 +621,35 @@ export default class MTProtoSender {
       this._authenticated = true;
       this._log.debug('Already have an auth key ...');
     }
+
+    if (shouldCheckHttpConnection) {
+      const httpConnectionCheck = new RequestState(new Api.Ping({ pingId: generateRandomLong() }));
+      const resolveHttpConnectionCheck = httpConnectionCheck.resolve!;
+      let hasReceivedPong = false;
+      httpConnectionCheck.resolve = (pong) => {
+        hasReceivedPong = true;
+        resolveHttpConnectionCheck(pong);
+      };
+      const pingData = this._sendQueue.getBeacon(httpConnectionCheck)!;
+      this._rememberSentMessage(httpConnectionCheck);
+
+      try {
+        await connection.send(await this._state.encryptMessageData(pingData));
+        const response = await connection.recv();
+        const message = await this.decryptMessageData(response);
+        this._pendingState.set(httpConnectionCheck.msgId!, httpConnectionCheck);
+        await this._processMessage(message);
+        if (message.obj instanceof Api.Pong && !hasReceivedPong) {
+          throw new Error('HTTP connection check did not receive a matching pong');
+        }
+      } catch (err) {
+        this._pendingState.delete(httpConnectionCheck.msgId!);
+        this._deleteSentMessage(httpConnectionCheck.msgId!);
+        connection.disconnect();
+        throw err;
+      }
+    }
+
     this._userConnected = true;
     this.isReconnecting = false;
 
@@ -586,11 +670,83 @@ export default class MTProtoSender {
       this._longPollLoopHandle = this._longPollLoop();
     }
 
+    if (this._isExported) {
+      this.scheduleFutureServerSaltRefresh(SERVER_SALT_REQUEST_RETRY_DELAY);
+    } else {
+      this.requestFutureServerSalts();
+    }
+
     // _disconnected only completes after manual disconnection
     // or errors after which the sender cannot continue such
     // as failing to reconnect or any unexpected error.
 
     this._log.info('Connection to %s complete!'.replace('%s', connection.toString()));
+  }
+
+  /**
+   * 解密传输数据，并在主连接的服务端时钟发生变化时同步全局状态
+   */
+  private async decryptMessageData(body: Uint8Array) {
+    const previousTimeOffset = this._state.timeOffset;
+    const message = await this._state.decryptMessageData(
+      body, this._hasRecentSentMessage.bind(this), this._isFallback,
+    ) as TLMessage;
+
+    if (!this._isExported && this._state.timeOffset !== previousTimeOffset) {
+      this._updateCallback?.(new UpdateServerTimeOffset(this._state.timeOffset));
+    }
+
+    return message;
+  }
+
+  /**
+   * 请求后续服务端盐值，并根据有效期安排下一次刷新
+   */
+  private requestFutureServerSalts() {
+    if (!this._userConnected || this.futureServerSaltRequest) return;
+
+    const request = this.send(new Api.GetFutureSalts({ num: MAX_FUTURE_SERVER_SALTS }))!;
+    this.futureServerSaltRequest = request;
+    void request
+      .then((futureSalts) => {
+        if (this.futureServerSaltRequest !== request) return;
+        if (!futureSalts?.salts.length) {
+          this.scheduleFutureServerSaltRefresh(SERVER_SALT_REQUEST_RETRY_DELAY);
+          return;
+        }
+
+        const latestValidUntil = futureSalts.salts.reduce((latest, { validUntil }) => (
+          Math.max(latest, validUntil)
+        ), 0);
+        const serverTime = this._state.getServerTime();
+        const refreshDelay = Math.max(
+          (latestValidUntil - serverTime - SERVER_SALT_REFRESH_MARGIN) * MILLISECONDS_PER_SECOND,
+          SERVER_SALT_REQUEST_RETRY_DELAY,
+        );
+        this.scheduleFutureServerSaltRefresh(refreshDelay);
+      })
+      .catch((err: unknown) => {
+        if (this.futureServerSaltRequest !== request) return;
+        this._log.warn(`Failed to request future server salts: ${String(err)}`);
+        this.scheduleFutureServerSaltRefresh(SERVER_SALT_REQUEST_RETRY_DELAY);
+      })
+      .finally(() => {
+        if (this.futureServerSaltRequest === request) this.futureServerSaltRequest = undefined;
+      });
+  }
+
+  /**
+   * 在当前连接存续期间安排服务端盐值刷新
+   * @param delay 下次请求前的延迟时间，单位为毫秒
+   */
+  private scheduleFutureServerSaltRefresh(delay: number) {
+    if (!this._userConnected) return;
+    if (this.futureServerSaltRefreshTimer) clearTimeout(this.futureServerSaltRefreshTimer);
+
+    this.futureServerSaltRefreshTimer = setTimeout(() => {
+      this.futureServerSaltRefreshTimer = undefined;
+      this.requestFutureServerSalts();
+    }, delay);
   }
 
   _disconnect(connection: Connection) {
@@ -605,6 +761,11 @@ export default class MTProtoSender {
 
     this._log.info('Disconnecting from %s...'.replace('%s', connection.toString()));
     this._userConnected = false;
+    this.futureServerSaltRequest = undefined;
+    if (this.futureServerSaltRefreshTimer) {
+      clearTimeout(this.futureServerSaltRefreshTimer);
+      this.futureServerSaltRefreshTimer = undefined;
+    }
     this._log.debug('Closing current connection...');
     this.logWithIndex.warn('Disconnecting');
     connection.disconnect();
@@ -642,7 +803,7 @@ export default class MTProtoSender {
         this._longPollLoopHandle = undefined;
         this.isSendingLongPoll = false;
         if (!this.userDisconnected) {
-          this.reconnect();
+          this.handleConnectionError(e);
         }
         return;
       }
@@ -776,7 +937,7 @@ export default class MTProtoSender {
         console.error(e);
         this._sendLoopHandle = undefined;
         if (!this.userDisconnected) {
-          this.reconnect();
+          this.handleConnectionError(e);
         }
         return;
       } finally {
@@ -818,21 +979,23 @@ export default class MTProtoSender {
           this._log.warn('Connection closed while receiving data');
           // eslint-disable-next-line no-console
           console.error(e);
-          this.reconnect();
+          this.handleConnectionError(e);
         }
         this._recvLoopHandle = undefined;
         return;
       }
 
+      if (body.length === TRANSPORT_CODE_LENGTH && body.every((byte) => byte === 0)) {
+        void this.checkLongPoll();
+        continue;
+      }
+
       try {
         // TODO: Handle `DecryptedDataBlock` in calls like a regular `TLMessage` rather than `Uint8Array`
-        message = (await this._state.decryptMessageData(
-          body, this._hasRecentSentMessage.bind(this),
-          this._isFallback,
-        )) as TLMessage;
+        message = await this.decryptMessageData(body);
       } catch (e: any) {
         this.logWithIndex.debug(`Error while receiving items from the network ${e.toString()}`);
-        if (e instanceof MessageReplayError && this._isFallback) {
+        if (e instanceof MessageReplayError) {
           continue;
         } else if (e instanceof TypeNotFoundError) {
           // Received object which we don't know how to deserialize
@@ -904,6 +1067,30 @@ export default class MTProtoSender {
     }), undefined, true);
   }
 
+  /**
+   * 处理传输错误，并在 HTTP 404 表示认证密钥失效时终止重连循环
+   * @param error 当前传输错误
+   */
+  private handleConnectionError(error: unknown) {
+    if (!this.shouldResetHttpAuthKey(error)) {
+      this.reconnect();
+      return;
+    }
+
+    if (this.hasHandledHttpAuthKeyError) return;
+    this.hasHandledHttpAuthKeyError = true;
+    this._handleBadAuthKey();
+  }
+
+  /**
+   * 判断 HTTP 404 是否表示当前连接持有的认证密钥已失效
+   */
+  private shouldResetHttpAuthKey(error: unknown, hadAuthKey?: boolean) {
+    return error instanceof HttpStreamError && error.status === 404
+      && (hadAuthKey ?? Boolean(this.authKey.getKey()))
+      && (this._isExported ? Boolean(this._onConnectionBreak) : this._isMainSender);
+  }
+
   _handleBadAuthKey(shouldSkipForMain?: boolean) {
     if (shouldSkipForMain && this._isMainSender) {
       return;
@@ -913,7 +1100,7 @@ export default class MTProtoSender {
 
     if (this._isMainSender && !this._isExported) {
       this._updateCallback?.(new UpdateConnectionState(UpdateConnectionState.broken));
-    } else if (!this._isMainSender && this._onConnectionBreak) {
+    } else if (this._isExported && this._onConnectionBreak) {
       this._onConnectionBreak(this._dcId);
     }
   }
@@ -1213,12 +1400,6 @@ export default class MTProtoSender {
     this._pendingState.delete(pong.msgId);
     this._deleteSentMessage(pong.msgId);
 
-    const { timeOffset: newTimeOffset, isSessionReset } = this._state.updateTimeOffset(message.msgId);
-    if (isSessionReset) this._resetSessionTracking();
-    if (!this._isExported) {
-      this._updateCallback?.(new UpdateServerTimeOffset(newTimeOffset));
-    }
-
     this._log.debug(`Handling pong for message ${pong.msgId}`);
     state.resolve?.(pong);
   }
@@ -1243,8 +1424,10 @@ export default class MTProtoSender {
     this._forgetSentMessage(badSalt.badMsgId, sentMessage.isContainer);
     this._log.debug(`Handling bad salt for message ${badSalt.badMsgId}`);
     const states = this._popStates(badSalt.badMsgId);
-    this._state.setServerSalt(badSalt.newServerSalt);
+    this._state.setServerSalt(badSalt.newServerSalt, true);
     this._sendQueue.extend(states);
+    this.futureServerSaltRequest = undefined;
+    this.requestFutureServerSalts();
     this._log.debug(`${states.length} message(s) will be resent`);
   }
 
@@ -1270,7 +1453,16 @@ export default class MTProtoSender {
       // Sent msg_id too low or too high (respectively).
       // Use the current msg_id to determine the right time offset.
       const { timeOffset: newTimeOffset, isSessionReset } = this._state.updateTimeOffset(message.msgId);
-      if (isSessionReset) this._resetSessionTracking();
+      const shouldResetSession = badMsg.errorCode === MESSAGE_ID_TOO_HIGH_ERROR_CODE;
+      if (shouldResetSession && !isSessionReset) this._state.reset();
+      if (shouldResetSession || isSessionReset) {
+        this._resetSessionTracking();
+
+        if (this._isFallback) {
+          this.getConnection()?.disconnect();
+          this.reconnect();
+        }
+      }
 
       if (!this._isExported) {
         this._updateCallback?.(new UpdateServerTimeOffset(newTimeOffset));
@@ -1305,7 +1497,7 @@ export default class MTProtoSender {
     const sentSeqNo = this._getSentMessageSeqNo(sentMessage);
     if (!BAD_MESSAGE_ERROR_CODES.has(errorCode) || sentSeqNo !== badMsgSeqno) return false;
     if (errorCode === 16) return badMsgId < notificationMsgId; // Message ID is too low
-    if (errorCode === 17) return badMsgId > notificationMsgId; // Message ID is too high
+    if (errorCode === MESSAGE_ID_TOO_HIGH_ERROR_CODE) return badMsgId > notificationMsgId;
     if (errorCode === 18) return (badMsgId & 3n) !== 0n; // Message ID has invalid low bits
     if (errorCode === 19 || errorCode === 64) return sentMessage.isContainer; // Duplicate ID or invalid container
     if (errorCode === 34) return (sentSeqNo & 1) === 1; // Even sequence number expected
@@ -1389,8 +1581,16 @@ export default class MTProtoSender {
     if (!(state?.request instanceof Api.GetFutureSalts)
       || state.request.num < 1
       || state.request.num > MAX_FUTURE_SERVER_SALTS
-      || futureSalts.salts.length > state.request.num
-      || !this._state.setFutureSalts(futureSalts.salts)) return;
+      || futureSalts.salts.length > state.request.num) return;
+
+    if (state.promise !== this.futureServerSaltRequest) {
+      this._pendingState.delete(futureSalts.reqMsgId);
+      this._forgetSentMessage(futureSalts.reqMsgId, false);
+      state.resolve?.();
+      return;
+    }
+
+    if (!this._state.setFutureSalts(futureSalts.salts)) return;
 
     this._pendingState.delete(futureSalts.reqMsgId);
     this._forgetSentMessage(futureSalts.reqMsgId, false);
@@ -1535,8 +1735,16 @@ export default class MTProtoSender {
 
     const shouldUseFallback = this._shouldUseFallbackOnReconnect;
     this._shouldUseFallbackOnReconnect = false;
-    const currentConnection = this._connection!;
+    const currentConnection = this._connection;
     const currentFallbackConnection = this._fallbackConnection;
+    if (!currentConnection) {
+      this.isReconnecting = false;
+      return;
+    }
+
+    // 等待旧传输循环退出，确保新连接会重新创建全部轮询循环
+    const previousLoops = [this._sendLoopHandle, this._recvLoopHandle, this._longPollLoopHandle]
+      .filter((loop): loop is Promise<void> => Boolean(loop));
     this._log.debug('Closing current connection...');
     try {
       this.logWithIndex.warn('[Reconnect] Closing current connection...');
@@ -1545,6 +1753,11 @@ export default class MTProtoSender {
     } catch (err: any) {
       this._log.warn(err);
     }
+
+    await Promise.allSettled(previousLoops);
+    this._sendLoopHandle = undefined;
+    this._recvLoopHandle = undefined;
+    this._longPollLoopHandle = undefined;
 
     this._sendQueue.append(undefined);
     this._state.reset();
@@ -1567,18 +1780,25 @@ export default class MTProtoSender {
       isTestServer: currentConnection._isTestServer,
       isPremium: currentConnection._isPremium,
     });
-    // @ts-expect-error -- Hacky way to create new class instance
-    const newFallbackConnection = new this._fallbackConnection.constructor({
-      ip: currentConnection._ip,
-      port: currentConnection._port,
-      dcId: currentConnection._dcId,
-      loggers: currentConnection._log,
-      isTestServer: currentConnection._isTestServer,
-      isPremium: currentConnection._isPremium,
-    });
-    await this.connect(newConnection, true, newFallbackConnection, shouldUseFallback);
-
-    this.isReconnecting = false;
+    // 仅在原连接存在 HTTP 回退通道时创建新的回退连接
+    const newFallbackConnection = currentFallbackConnection
+      ? // @ts-expect-error -- 保留当前连接的具体实现类型
+      new currentFallbackConnection.constructor({
+        ip: currentConnection._ip,
+        port: currentConnection._port,
+        dcId: currentConnection._dcId,
+        loggers: currentConnection._log,
+        isTestServer: currentConnection._isTestServer,
+        isPremium: currentConnection._isPremium,
+      })
+      : undefined;
+    try {
+      await this.connect(newConnection, true, newFallbackConnection, shouldUseFallback);
+    } catch {
+      return;
+    } finally {
+      this.isReconnecting = false;
+    }
 
     if (this._autoReconnectCallback) {
       await this._autoReconnectCallback();
