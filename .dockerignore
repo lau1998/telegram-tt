@@ -1,0 +1,10 @@
+.git
+.cache
+dist
+node_modules
+build-contest
+tests
+dev/perf/screenshot*
+.idea
+*.iml
+.DS_Store

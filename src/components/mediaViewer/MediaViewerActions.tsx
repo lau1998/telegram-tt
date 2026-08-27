@@ -309,7 +309,7 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
   }
 
   function renderSaveMediaStreamButton() {
-    if (isProtected || item?.type === 'sponsoredMessage' || !message || !media) {
+    if (item?.type === 'sponsoredMessage' || !message || !media) {
       return undefined;
     }
 
@@ -374,14 +374,14 @@ const MediaViewerActions: FC<OwnProps & StateProps> = ({
             : newLang('MediaDownload'),
         });
       }
+    }
 
-      if (message && media) {
-        menuItems.push({
-          icon: 'cloud-download',
-          onClick: handleSaveMediaStream,
-          children: newLang('MediaStreamSave'),
-        });
-      }
+    if (message && media) {
+      menuItems.push({
+        icon: 'cloud-download',
+        onClick: handleSaveMediaStream,
+        children: newLang('MediaStreamSave'),
+      });
     }
 
     if (canReportAvatar) {
