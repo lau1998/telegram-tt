@@ -118,9 +118,11 @@ const Document = ({
   );
 
   const hasPreview = getDocumentHasPreview(document);
+  const isVideo = isDocumentVideo(document);
   const previewMedia = useMemo<MediaContent | undefined>(
-    () => (hasPreview ? { document } : undefined),
-    [document, hasPreview],
+    // 视频文档需要请求 pictogram，即使服务端没有内联缩略图
+    () => ((hasPreview || isVideo) ? { document } : undefined),
+    [document, hasPreview, isVideo],
   );
 
   const shouldForceDownload = document.innerMediaType === 'photo' && document.mediaSize
@@ -204,6 +206,8 @@ const Document = ({
         previewMedia={previewMedia}
         observeIntersection={observeIntersection}
         previewSize={fileSize}
+        videoDimensions={isVideo ? document.mediaSize : undefined}
+        videoDuration={isVideo ? document.duration : undefined}
         isTransferring={isTransferring}
         isUploading={isUploading}
         transferProgress={transferProgress}
@@ -211,7 +215,7 @@ const Document = ({
         sender={sender}
         isSelectable={isSelectable}
         isSelected={isSelected}
-        actionIcon={withMediaViewer ? (isDocumentVideo(document) ? 'play' : 'eye') : 'download'}
+        actionIcon={withMediaViewer ? (isVideo && isLoaded ? 'play' : 'download') : 'download'}
         contextActions={contextActions}
         onClick={handleClick}
         onDateClick={onDateClick ? handleDateClick : undefined}

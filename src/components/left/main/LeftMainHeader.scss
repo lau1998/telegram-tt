@@ -90,12 +90,12 @@
     }
   }
 
-  // 下载数量徽标固定在左上角菜单按钮右上方
+  // 下载数量徽标保留在按钮可视范围内，避免被圆形按钮裁切
   .download-count-badge {
     position: absolute;
     z-index: 1;
-    top: -0.25rem;
-    right: -0.25rem;
+    top: 0.125rem;
+    right: 0.125rem;
 
     min-width: 1.125rem;
     height: 1.125rem;

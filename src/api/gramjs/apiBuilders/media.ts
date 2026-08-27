@@ -182,39 +182,41 @@ export function buildApiDocument(document: GramJs.TypeDocument): ApiDocument | u
   const previewPhotoSizes = thumbs && buildApiPhotoPreviewSizes(thumbs);
 
   let innerMediaType: ApiDocument['innerMediaType'] | undefined;
+  let duration: ApiDocument['duration'];
   let mediaSize: ApiDocument['mediaSize'] | undefined;
   if (photoSize) {
     mediaSize = {
       width: photoSize.w,
       height: photoSize.h,
     };
+  }
 
-    if (SUPPORTED_PHOTO_CONTENT_TYPES.has(mimeType)) {
-      innerMediaType = 'photo';
+  if (SUPPORTED_PHOTO_CONTENT_TYPES.has(mimeType)) {
+    innerMediaType = 'photo';
 
-      const imageAttribute = attributes
-        .find((a): a is GramJs.DocumentAttributeImageSize => a instanceof GramJs.DocumentAttributeImageSize);
+    const imageAttribute = attributes
+      .find((a): a is GramJs.DocumentAttributeImageSize => a instanceof GramJs.DocumentAttributeImageSize);
 
-      if (imageAttribute) {
-        const { w: width, h: height } = imageAttribute;
-        mediaSize = {
-          width,
-          height,
-          fromDocumentAttribute: true,
-        };
-      }
-    } else if (SUPPORTED_VIDEO_CONTENT_TYPES.has(mimeType)) {
-      innerMediaType = 'video';
-      const videoAttribute = attributes
-        .find((a): a is GramJs.DocumentAttributeVideo => a instanceof GramJs.DocumentAttributeVideo);
+    if (imageAttribute) {
+      const { w: width, h: height } = imageAttribute;
+      mediaSize = {
+        width,
+        height,
+        fromDocumentAttribute: true,
+      };
+    }
+  } else if (SUPPORTED_VIDEO_CONTENT_TYPES.has(mimeType)) {
+    innerMediaType = 'video';
+    const videoAttribute = attributes
+      .find((a): a is GramJs.DocumentAttributeVideo => a instanceof GramJs.DocumentAttributeVideo);
 
-      if (videoAttribute) {
-        const { w: width, h: height } = videoAttribute;
-        mediaSize = {
-          width,
-          height,
-        };
-      }
+    if (videoAttribute) {
+      const { duration: videoDuration, w: width, h: height } = videoAttribute;
+      duration = videoDuration;
+      mediaSize = {
+        width,
+        height,
+      };
     }
   }
 
@@ -227,6 +229,7 @@ export function buildApiDocument(document: GramJs.TypeDocument): ApiDocument | u
     fileName: buildApiDocumentFileName(document),
     thumbnail,
     innerMediaType,
+    duration,
     mediaSize,
     previewPhotoSizes,
   };

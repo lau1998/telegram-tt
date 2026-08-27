@@ -3,13 +3,13 @@ import {
   memo, useRef,
 } from '../../lib/teact/teact';
 
-import type { ApiAttachment, MediaContent } from '../../api/types';
+import type { ApiAttachment, ApiDimensions, MediaContent } from '../../api/types';
 import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { IconName } from '../../types/icons';
 import type { MenuItemContextAction } from '../ui/ListItem';
 
 import buildClassName from '../../util/buildClassName';
-import { formatMediaDateTime, formatPastTimeShort } from '../../util/dates/oldDateFormat';
+import { formatMediaDateTime, formatMediaDuration, formatPastTimeShort } from '../../util/dates/oldDateFormat';
 import { getColorFromExtension } from './helpers/documentInfo';
 import { getDocumentThumbnailDimensions } from './helpers/mediaDimensions';
 import renderText from './helpers/renderText';
@@ -43,6 +43,8 @@ type OwnProps = {
   sender?: string;
   previewMedia?: MediaContent;
   previewAttachment?: ApiAttachment;
+  videoDimensions?: ApiDimensions;
+  videoDuration?: number;
   observeIntersection?: ObserveFn;
   className?: string;
   previewSize?: FileSize;
@@ -67,6 +69,8 @@ const File = ({
   sender,
   previewMedia,
   previewAttachment,
+  videoDimensions,
+  videoDuration,
   className,
   previewSize = 'medium',
   isTransferring,
@@ -108,6 +112,10 @@ const File = ({
 
   const { width } = getDocumentThumbnailDimensions(previewSize);
   const shouldRenderPreview = canRenderCompactMediaPreview(previewMedia, previewAttachment);
+  const isVideoPreview = Boolean(videoDimensions && videoDuration !== undefined && previewMedia);
+  const videoPreviewStyle = videoDimensions
+    ? `--file-video-preview-aspect-ratio: ${videoDimensions.width / videoDimensions.height}`
+    : undefined;
 
   const fullClassName = buildClassName(
     'File',
@@ -115,6 +123,7 @@ const File = ({
     previewSize !== 'medium' && `size-${previewSize}`,
     onClick && !isUploading && 'interactive',
     isSelected && 'file-is-selected',
+    isVideoPreview && 'with-video-preview',
     contextMenuAnchor && 'has-menu-open',
   );
 
@@ -123,6 +132,7 @@ const File = ({
       id={id}
       ref={elementRef}
       className={fullClassName}
+      style={videoPreviewStyle}
       dir={lang.isRtl ? 'rtl' : undefined}
       onMouseDown={handleBeforeContextMenu}
       onContextMenu={contextActions ? handleContextMenu : undefined}
@@ -146,6 +156,13 @@ const File = ({
             {extension.length <= 4 && (
               <span className="file-ext" dir="auto">{extension}</span>
             )}
+          </div>
+        )}
+        {isVideoPreview && (
+          <div className="file-video-meta">
+            <span>{formatMediaDuration(videoDuration!)}</span>
+            <span className="file-video-meta-separator">&middot;</span>
+            <AnimatedFileSize size={size} progress={isTransferring ? transferProgress : undefined} />
           </div>
         )}
         {shouldSpinnerRender && (
