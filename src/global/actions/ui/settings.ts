@@ -7,6 +7,7 @@ import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { IS_IOS } from '../../../util/browser/windowEnvironment';
 import { disableDebugConsole, initDebugConsole } from '../../../util/debugConsole';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
+import { applyInterfaceTextSize } from '../../../util/interfaceTextSize';
 import { setTimeFormat as setLocalizedTimeFormat } from '../../../util/localization';
 import { oldSetLanguage, setTimeFormat as setLegacyTimeFormat } from '../../../util/oldLangProvider';
 import { applyPerformanceSettings } from '../../../util/perfomanceSettings';
@@ -63,6 +64,10 @@ addCallback((global: GlobalState) => {
   if (sharedSettings.timeFormat !== oldSharedSettings.timeFormat) {
     setLocalizedTimeFormat(sharedSettings.timeFormat);
     setLegacyTimeFormat(sharedSettings.timeFormat);
+  }
+
+  if (sharedSettings.interfaceTextSize !== oldSharedSettings.interfaceTextSize) {
+    applyInterfaceTextSize(sharedSettings.interfaceTextSize);
   }
 
   if (sharedSettings.messageTextSize !== oldSharedSettings.messageTextSize) {

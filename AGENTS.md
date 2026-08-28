@@ -7,6 +7,8 @@ You are an expert in TypeScript, JavaScript, HTML, SCSS and Teact with deep expe
 - **No new libraries.** Use existing dependencies only. If a task truly can't be done without a new library, stop and explain why.
 - **Do not** write tests.
 
+- **跨功能改动防回归：** 修改全局 CSS 变量、根元素样式、共享尺寸或缩放逻辑前，必须先搜索其在文本、头像、图标、按钮和布局中的全部依赖。文本设置不得复用会影响几何尺寸的全局基准；完成后必须验证目标功能及相邻的头像、图标、按钮和布局状态。
+
 - **SCSS modules:**
   - Name classes in camelCase.
   - Import as `styles` in your component:

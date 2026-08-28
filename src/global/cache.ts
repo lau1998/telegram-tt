@@ -26,6 +26,7 @@ import {
   GLOBAL_STATE_CACHE_DISABLED,
   GLOBAL_STATE_CACHE_USER_LIST_LIMIT,
   INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT,
+  INTERFACE_TEXT_SIZE_DEFAULT,
   IS_SCREEN_LOCKED_CACHE_KEY,
   SAVED_FOLDER_ID,
   SHARED_STATE_CACHE_KEY,
@@ -419,6 +420,7 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
       foldersPosition: FOLDERS_POSITION_DEFAULT,
       messageSendKeyCombo: untypedCached.settings.byKey.messageSendKeyCombo,
       shouldReplaceTextShortcuts: true,
+      interfaceTextSize: INTERFACE_TEXT_SIZE_DEFAULT,
       messageTextSize: untypedCached.settings.byKey.messageTextSize,
       instantViewFontSizeAdjust: INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT,
       performance: untypedCached.settings.performance,
@@ -448,6 +450,10 @@ function unsafeMigrateCache(cached: GlobalState, initialState: GlobalState) {
   }
 
   const cachedSharedSettings = cached.sharedState.settings;
+  if (cachedSharedSettings.interfaceTextSize === undefined) {
+    cachedSharedSettings.interfaceTextSize = INTERFACE_TEXT_SIZE_DEFAULT;
+  }
+
   if (cachedSharedSettings.instantViewFontSizeAdjust === undefined) {
     cachedSharedSettings.instantViewFontSizeAdjust = INSTANT_VIEW_FONT_SIZE_ADJUST_DEFAULT;
   }

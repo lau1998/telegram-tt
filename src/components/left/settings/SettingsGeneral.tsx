@@ -3,7 +3,7 @@ import {
 } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
-import type { SharedSettings } from '../../../global/types';
+import type { InterfaceTextSize, SharedSettings } from '../../../global/types';
 import type { ThemeKey, TimeFormat } from '../../../types';
 import type { IRadioOption } from '../../ui/RadioGroup';
 import { SettingsScreens } from '../../../types';
@@ -32,6 +32,7 @@ type OwnProps = {
 
 type StateProps =
   Pick<SharedSettings, (
+    'interfaceTextSize' |
     'messageTextSize' |
     'messageSendKeyCombo' |
     'shouldReplaceTextShortcuts' |
@@ -42,6 +43,7 @@ type StateProps =
 
 const SettingsGeneral = ({
   isActive,
+  interfaceTextSize,
   messageTextSize,
   messageSendKeyCombo,
   shouldReplaceTextShortcuts,
@@ -78,6 +80,17 @@ const SettingsGeneral = ({
     value: 'auto',
   }];
 
+  const interfaceTextSizeOptions: IRadioOption[] = [{
+    label: lang('SettingsInterfaceTextSizeSmall'),
+    value: 'small',
+  }, {
+    label: lang('SettingsInterfaceTextSizeMedium'),
+    value: 'medium',
+  }, {
+    label: lang('SettingsInterfaceTextSizeLarge'),
+    value: 'large',
+  }];
+
   const keyboardSendOptions = !isMobileDevice ? [
     { value: 'enter', label: lang('SettingsSendEnter'), subLabel: lang('SettingsSendEnterDescription') },
     {
@@ -97,6 +110,13 @@ const SettingsGeneral = ({
 
     setSharedSettingOption({ messageTextSize: newSize });
   }, []);
+
+  /**
+   * 保存用户选择的界面文字档位
+   */
+  const handleInterfaceTextSizeChange = useLastCallback((newSize: string) => {
+    setSharedSettingOption({ interfaceTextSize: newSize as InterfaceTextSize });
+  });
 
   const handleAppearanceThemeChange = useCallback((value: string) => {
     const newTheme = value === 'auto' ? getSystemTheme() : value as ThemeKey;
@@ -127,6 +147,12 @@ const SettingsGeneral = ({
     <div className="settings-content custom-scroll">
       <IslandTitle dir={lang.isRtl ? 'rtl' : undefined}>{lang('Settings')}</IslandTitle>
       <Island>
+        <RadioGroup
+          name="interface-text-size"
+          options={interfaceTextSizeOptions}
+          selected={interfaceTextSize}
+          onChange={handleInterfaceTextSizeChange}
+        />
         <RangeSlider
           label={lang('TextSize')}
           min={12}
@@ -191,6 +217,7 @@ export default memo(withGlobal<OwnProps>(
       shouldUseSystemTheme,
       messageSendKeyCombo,
       shouldReplaceTextShortcuts,
+      interfaceTextSize,
       messageTextSize,
       timeFormat,
     } = selectSharedSettings(global);
@@ -198,6 +225,7 @@ export default memo(withGlobal<OwnProps>(
     return {
       messageSendKeyCombo,
       shouldReplaceTextShortcuts,
+      interfaceTextSize,
       messageTextSize,
       timeFormat,
       theme,

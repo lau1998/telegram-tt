@@ -484,6 +484,9 @@
 "SettingsTray" = "Show Icon in Menu Bar";
 "SettingsOfflineNotificationUnsupported" = "Not supported";
 "TextSize" = "Message Font Size";
+"SettingsInterfaceTextSizeSmall" = "Interface Font Size: Small";
+"SettingsInterfaceTextSizeMedium" = "Interface Font Size: Medium";
+"SettingsInterfaceTextSizeLarge" = "Interface Font Size: Large";
 "ChatBackground" = "Chat Wallpaper";
 "ChatBackgroundColorThemes" = "Colors, Gradients & Patterns";
 "Theme" = "Theme";

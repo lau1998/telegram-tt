@@ -421,6 +421,9 @@ export interface LangPair {
   'SettingsTray': undefined;
   'SettingsOfflineNotificationUnsupported': undefined;
   'TextSize': undefined;
+  'SettingsInterfaceTextSizeSmall': undefined;
+  'SettingsInterfaceTextSizeMedium': undefined;
+  'SettingsInterfaceTextSizeLarge': undefined;
   'ChatBackground': undefined;
   'ChatBackgroundColorThemes': undefined;
   'Theme': undefined;

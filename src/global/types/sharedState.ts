@@ -9,6 +9,8 @@ export interface SharedState {
   isInitial?: true;
 }
 
+export type InterfaceTextSize = 'small' | 'medium' | 'large';
+
 export interface SharedSettings {
   shouldUseSystemTheme: boolean;
   theme: ThemeKey;
@@ -16,6 +18,7 @@ export interface SharedSettings {
   language: string;
   languages?: ApiLanguage[];
   performance: PerformanceType;
+  interfaceTextSize: InterfaceTextSize;
   messageTextSize: number;
   instantViewFontSizeAdjust: number;
   animationLevel: AnimationLevel;

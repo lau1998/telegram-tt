@@ -49,6 +49,22 @@ body {
   }
 }
 
+html[data-interface-text-size="small"] {
+  --interface-text-size: 0.875rem;
+}
+
+html[data-interface-text-size="medium"] {
+  --interface-text-size: 1rem;
+}
+
+html[data-interface-text-size="large"] {
+  --interface-text-size: 1.125rem;
+}
+
+body {
+  font-size: var(--interface-text-size);
+}
+
 noscript {
   display: grid;
   align-content: center;

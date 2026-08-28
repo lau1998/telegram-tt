@@ -12,6 +12,7 @@ import {
 } from '../../../util/browser/windowEnvironment';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import generateUniqueId from '../../../util/generateUniqueId';
+import { applyInterfaceTextSize } from '../../../util/interfaceTextSize';
 import { setTimeFormat as setLocalizedTimeFormat } from '../../../util/localization';
 import { subscribe, unsubscribe } from '../../../util/notifications';
 import { oldSetLanguage } from '../../../util/oldLangProvider';
@@ -142,7 +143,7 @@ addCallback((global: GlobalState) => {
   }, tabState.id);
 
   const {
-    messageTextSize, language, shouldUseSystemTheme, timeFormat,
+    interfaceTextSize, messageTextSize, language, shouldUseSystemTheme, timeFormat,
   } = selectSharedSettings(global);
 
   const globalTheme = selectTheme(global);
@@ -155,6 +156,7 @@ addCallback((global: GlobalState) => {
   setLocalizedTimeFormat(timeFormat);
 
   requestMutation(() => {
+    applyInterfaceTextSize(interfaceTextSize);
     document.documentElement.style.setProperty(
       '--composer-text-size', `${Math.max(messageTextSize, IS_IOS ? 16 : 15)}px`,
     );
