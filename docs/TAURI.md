@@ -59,6 +59,8 @@ For details on upgrading Tauri dependencies, refer to the [official documentatio
 
 - `npm run tauri:dev` — run Tauri in development mode.
 
+- `npm run package:client` — build the client and print absolute paths for generated installers and `.app` bundles. Additional Tauri arguments can be passed after `--`, for example `npm run package:client -- --target aarch64-apple-darwin`.
+
 - `npm run tauri` — placeholder, which allows you to run [Tauri CLI](https://v2.tauri.app/reference/cli/) commands with `npm run tauri {COMMAND}`.
 
 ## Implementation specifics
