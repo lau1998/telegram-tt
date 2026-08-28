@@ -34,8 +34,11 @@ type StateProps = Pick<AccountSettings, (
   'canAutoLoadFileInPrivateChats' |
   'canAutoLoadFileInGroups' |
   'canAutoLoadFileInChannels' |
-  'autoLoadFileMaxSizeMb'
+  'autoLoadFileMaxSizeMb' |
+  'downloadConcurrency'
 )>;
+
+const DEFAULT_DOWNLOAD_CONCURRENCY = 3;
 
 const SettingsDataStorage = ({
   isActive,
@@ -52,6 +55,7 @@ const SettingsDataStorage = ({
   canAutoLoadFileInGroups,
   canAutoLoadFileInChannels,
   autoLoadFileMaxSizeMb,
+  downloadConcurrency,
   onReset,
 }: OwnProps & StateProps) => {
   const { setSettingOption, showNotification } = getActions();
@@ -73,6 +77,17 @@ const SettingsDataStorage = ({
   const handleFileSizeChange = useLastCallback((value: number) => {
     setSettingOption({ autoLoadFileMaxSizeMb: AUTODOWNLOAD_FILESIZE_MB_LIMITS[value] });
   });
+
+  const renderDownloadConcurrency = useLastCallback((value: number) => (
+    lang('DownloadConcurrencyValue', { count: value })
+  ));
+
+  const handleDownloadConcurrencyChange = useLastCallback((value: number) => {
+    setSettingOption({ downloadConcurrency: Math.min(10, Math.max(1, value)) });
+  });
+
+  const configuredDownloadConcurrency = Number.isFinite(downloadConcurrency)
+    ? downloadConcurrency : DEFAULT_DOWNLOAD_CONCURRENCY;
 
   const handlePurge = useLastCallback(() => {
     purgeClearableCache();
@@ -164,6 +179,16 @@ const SettingsDataStorage = ({
         canAutoLoadFileInChannels,
       )}
       <Island>
+        <RangeSlider
+          label={lang('DownloadConcurrency')}
+          min={1}
+          max={10}
+          value={Math.min(10, Math.max(1, configuredDownloadConcurrency))}
+          renderValue={renderDownloadConcurrency}
+          onChange={handleDownloadConcurrencyChange}
+        />
+      </Island>
+      <Island>
         <ListItem
           onClick={handlePurge}
           icon="delete"
@@ -197,6 +222,7 @@ export default memo(withGlobal<OwnProps>(
       'canAutoLoadFileInGroups',
       'canAutoLoadFileInChannels',
       'autoLoadFileMaxSizeMb',
+      'downloadConcurrency',
     ]);
   },
 )(SettingsDataStorage));

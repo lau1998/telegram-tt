@@ -388,6 +388,8 @@ export interface LangPair {
   'ClearOtherWebSessionsHelp': undefined;
   'AreYouSureWebSessions': undefined;
   'AutoDownloadMaxFileSize': undefined;
+  'DownloadConcurrency': undefined;
+  'DownloadWaiting': undefined;
   'AutoDownloadSettingsContacts': undefined;
   'AutoDownloadSettingsPrivateChats': undefined;
   'AutoDownloadSettingsGroupChats': undefined;
@@ -2501,6 +2503,15 @@ export interface LangPairWithVariables<V = LangVariable> {
   };
   'AutodownloadSizeLimitUpTo': {
     'limit': V;
+  };
+  'DownloadConcurrencyValue': {
+    'count': V;
+  };
+  'DownloadSpeedKbps': {
+    'speed': V;
+  };
+  'DownloadSpeedMbps': {
+    'speed': V;
   };
   'AutoDeleteSetInfo': {
     'time': V;

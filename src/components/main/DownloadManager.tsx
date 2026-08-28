@@ -21,6 +21,7 @@ import styles from './DownloadManager.module.scss';
 
 type StateProps = {
   activeDownloads: TabState['activeDownloads'];
+  downloadConcurrency: number;
 };
 
 type OwnProps = {
@@ -29,12 +30,35 @@ type OwnProps = {
 };
 
 const GLOBAL_UPDATE_DEBOUNCE = 1000;
+const MAX_DOWNLOAD_CONCURRENCY = 10;
+const DEFAULT_DOWNLOAD_CONCURRENCY = 3;
+const PROGRESS_UPDATE_INTERVAL = 200;
 
 const processedHashes = new Set<string>();
 const downloadedHashes = new Set<string>();
+const runningHashes = new Set<string>();
+const startedAtByHash = new Map<string, number>();
+const lastProgressAtByHash = new Map<string, number>();
+
+/** 将每秒字节数转换为下载面板使用的数值和单位键 */
+function getSpeedDisplay(bytesPerSecond: number) {
+  if (bytesPerSecond >= 1024 * 1024) {
+    return { value: (bytesPerSecond / (1024 * 1024)).toFixed(1), unit: 'DownloadSpeedMbps' as const };
+  }
+
+  return { value: Math.max(1, Math.round(bytesPerSecond / 1024)), unit: 'DownloadSpeedKbps' as const };
+}
+
+/** 释放指定下载任务占用的并发名额及其瞬时进度状态 */
+function releaseDownloadSlot(mediaHash: string) {
+  runningHashes.delete(mediaHash);
+  startedAtByHash.delete(mediaHash);
+  lastProgressAtByHash.delete(mediaHash);
+}
 
 const DownloadManager = ({
   activeDownloads,
+  downloadConcurrency,
   isOpen,
   onClose,
 }: OwnProps & StateProps) => {
@@ -58,18 +82,27 @@ const DownloadManager = ({
   useEffect(() => {
     if (!Object.keys(activeDownloads).length) {
       processedHashes.clear();
+      runningHashes.clear();
+      startedAtByHash.clear();
+      lastProgressAtByHash.clear();
       return;
     }
 
-    Object.entries(activeDownloads).forEach(([mediaHash, metadata]) => {
+    const configuredConcurrency = Number.isFinite(downloadConcurrency)
+      ? downloadConcurrency : DEFAULT_DOWNLOAD_CONCURRENCY;
+    const maxConcurrency = Math.min(MAX_DOWNLOAD_CONCURRENCY, Math.max(1, configuredConcurrency));
+    const activeEntries = Object.entries(activeDownloads);
+    activeEntries.forEach(([mediaHash, metadata]) => {
       if (metadata.isSaveMediaStream) {
         return;
       }
 
-      if (processedHashes.has(mediaHash)) {
+      if (processedHashes.has(mediaHash) || runningHashes.size >= maxConcurrency) {
         return;
       }
       processedHashes.add(mediaHash);
+      runningHashes.add(mediaHash);
+      startedAtByHash.set(mediaHash, Date.now());
 
       const { size, filename, format: mediaFormat } = metadata;
       const callbackUniqueId = generateUniqueId();
@@ -80,6 +113,7 @@ const DownloadManager = ({
 
       if (mediaData) {
         download(mediaData, filename);
+        releaseDownloadSlot(mediaHash);
         handleMediaDownloaded(mediaHash);
         return;
       }
@@ -88,11 +122,17 @@ const DownloadManager = ({
         showNotification({
           message: 'Downloading files bigger than 2GB is not supported in your browser.',
         });
+        releaseDownloadSlot(mediaHash);
         handleMediaDownloaded(mediaHash);
         return;
       }
 
       const handleProgress = (progress: number) => {
+        const now = Date.now();
+        if (progress < 1 && now - (lastProgressAtByHash.get(mediaHash) || 0) < PROGRESS_UPDATE_INTERVAL) {
+          return;
+        }
+        lastProgressAtByHash.set(mediaHash, now);
         updateMediaDownloadProgress({ mediaHash, progress });
 
         const currentDownloads = selectTabState(getGlobal()).activeDownloads;
@@ -121,9 +161,12 @@ const DownloadManager = ({
         })
         .catch(() => {
           handleMediaDownloaded(mediaHash);
+        })
+        .finally(() => {
+          releaseDownloadSlot(mediaHash);
         });
     });
-  }, [activeDownloads]);
+  }, [activeDownloads, downloadConcurrency]);
 
   const downloadEntries = Object.entries(activeDownloads);
   if (!downloadEntries.length) {
@@ -143,13 +186,18 @@ const DownloadManager = ({
           <div className={styles.list}>
             {downloadEntries.map(([mediaHash, metadata]) => {
               const progress = metadata.progress || 0;
+              const startedAt = startedAtByHash.get(mediaHash);
+              const elapsedSeconds = startedAt ? Math.max((Date.now() - startedAt) / 1000, 1) : 0;
+              const speed = elapsedSeconds && progress > 0 ? metadata.size * progress / elapsedSeconds : 0;
+              const speedDisplay = speed > 0 ? getSpeedDisplay(speed) : undefined;
+              const isWaiting = !processedHashes.has(mediaHash) && !metadata.isSaveMediaStream;
               return (
                 <div key={mediaHash} className={styles.item}>
                   <div className={styles.itemInfo}>
                     <span className={styles.filename} title={metadata.filename}>{metadata.filename}</span>
                     <span className={styles.progress}>
-                      {Math.round(progress * 100)}
-                      %
+                      {isWaiting ? lang('DownloadWaiting') : `${Math.round(progress * 100)}%`}
+                      {!isWaiting && speedDisplay && ` · ${lang(speedDisplay.unit, { speed: speedDisplay.value })}`}
                     </span>
                   </div>
                   <ProgressSpinner
@@ -170,9 +218,11 @@ const DownloadManager = ({
 export default memo(withGlobal<OwnProps>(
   (global): Complete<StateProps> => {
     const activeDownloads = selectTabState(global).activeDownloads;
+    const downloadConcurrency = global.settings.byKey.downloadConcurrency;
 
     return {
       activeDownloads,
+      downloadConcurrency,
     };
   },
 )(DownloadManager));

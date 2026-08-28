@@ -451,6 +451,11 @@
 "AreYouSureWebSessions" = "Are you sure you want to disconnect all websites where you logged in with Telegram?";
 "AutodownloadSizeLimitUpTo" = "up to {limit}";
 "AutoDownloadMaxFileSize" = "Maximum file size";
+"DownloadConcurrency" = "Simultaneous downloads";
+"DownloadConcurrencyValue" = "{count}";
+"DownloadWaiting" = "Waiting";
+"DownloadSpeedKbps" = "{speed} KB/s";
+"DownloadSpeedMbps" = "{speed} MB/s";
 "AutoDownloadSettingsContacts" = "Contacts";
 "AutoDownloadSettingsPrivateChats" = "Other Private Chats";
 "AutoDownloadSettingsGroupChats" = "Group Chats";

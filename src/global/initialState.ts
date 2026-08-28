@@ -316,6 +316,7 @@ export const INITIAL_GLOBAL_STATE: GlobalState = {
       canAutoLoadFileInGroups: false,
       canAutoLoadFileInChannels: false,
       autoLoadFileMaxSizeMb: 10,
+      downloadConcurrency: 3,
       hasWebNotifications: true,
       hasPushNotifications: true,
       shouldNotifyAboutPinnedMessages: true,

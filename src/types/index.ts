@@ -165,6 +165,8 @@ export interface AccountSettings {
   canAutoLoadFileInGroups: boolean;
   canAutoLoadFileInChannels: boolean;
   autoLoadFileMaxSizeMb: number;
+  /** 下载任务的全局并发上限，范围为 1 到 10 */
+  downloadConcurrency: number;
   shouldSuggestStickers: boolean;
   shouldSuggestCustomEmoji: boolean;
   shouldUpdateStickerSetOrder: boolean;
