@@ -1,10 +1,11 @@
 import {
-  useEffect, useRef, useState,
+  useEffect, useMemo, useRef, useState,
 } from '../lib/teact/teact';
 
+import type { GlobalState } from '../global/types';
 import { ApiMediaFormat } from '../api/types';
 
-import { selectActiveDownloads, selectIsSynced } from '../global/selectors';
+import { selectIsSynced, selectMediaDownloadProgress } from '../global/selectors';
 import { IS_PROGRESSIVE_SUPPORTED } from '../util/browser/windowEnvironment';
 import * as mediaLoader from '../util/mediaLoader';
 import useSelector from './data/useSelector';
@@ -30,7 +31,11 @@ export default function useMediaWithLoadProgress(
 
   const forceUpdate = useForceUpdate();
   const isSynced = useSelector(selectIsSynced);
-  const activeDownloads = useSelector(selectActiveDownloads);
+  // 每个媒体只订阅自己的进度，避免任意下载更新整批媒体组件
+  const mediaProgressSelector = useMemo(() => (global: GlobalState) => (
+    mediaHash ? selectMediaDownloadProgress(global, mediaHash) : undefined
+  ), [mediaHash]);
+  const globalProgress = useSelector(mediaProgressSelector);
   const id = useUniqueId();
   const [loadProgress, setLoadProgress] = useState(mediaData && !isStreaming ? 1 : 0);
   const startedAtRef = useRef<number>();
@@ -88,7 +93,6 @@ export default function useMediaWithLoadProgress(
     };
   }, [id, mediaHash]);
 
-  const globalProgress = mediaHash ? activeDownloads[mediaHash]?.progress : undefined;
   const unifiedProgress = globalProgress === undefined
     ? loadProgress
     : Math.max(loadProgress, globalProgress);

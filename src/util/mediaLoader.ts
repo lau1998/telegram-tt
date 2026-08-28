@@ -94,16 +94,24 @@ export function getFromMemory(url: string) {
   return memoryCache.get(url) as ApiPreparedMedia;
 }
 
+/** 释放缓存媒体对应的 Blob URL，避免长时间浏览媒体后持续占用内存 */
+function revokeCachedMedia(media: ApiPreparedMedia | undefined) {
+  if (typeof media === 'string' && media.startsWith('blob:')) {
+    URL.revokeObjectURL(media);
+  }
+}
+
 export function cancelProgress(progressCallback: ApiOnProgress) {
   progressCallbacks.forEach((map, url) => {
-    map.forEach((callback) => {
+    map.forEach((callback, callbackUniqueId) => {
       if (callback === progressCallback) {
         const parentCallback = cancellableCallbacks.get(url);
-        if (!parentCallback) return;
-
-        cancelApiProgress(parentCallback);
-        cancellableCallbacks.delete(url);
-        progressCallbacks.delete(url);
+        map.delete(callbackUniqueId);
+        if (parentCallback && !map.size) {
+          cancelApiProgress(parentCallback);
+          cancellableCallbacks.delete(url);
+          progressCallbacks.delete(url);
+        }
         return;
       }
     });
@@ -182,6 +190,7 @@ async function fetchFromCacheOrRemote(
 }
 
 export async function unload(url: string) {
+  revokeCachedMedia(memoryCache.get(url));
   memoryCache.delete(url);
   if (!MEDIA_CACHE_DISABLED) {
     const cacheName = url.startsWith('avatar') ? MEDIA_CACHE_NAME_AVATARS : MEDIA_CACHE_NAME;
@@ -195,6 +204,7 @@ function makeOnProgress(url: string) {
       callback(progress);
       if (callback.isCanceled) {
         onProgress.isCanceled = true;
+        revokeCachedMedia(memoryCache.get(url));
         memoryCache.delete(url);
       }
     });
