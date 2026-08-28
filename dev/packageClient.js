@@ -1,18 +1,22 @@
 import { spawnSync } from 'child_process';
-import { readdirSync, statSync } from 'fs';
-import { join, resolve } from 'path';
+import { existsSync, readdirSync, statSync } from 'fs';
+import { dirname, join, resolve } from 'path';
 
 const BUNDLE_FILE_EXTENSIONS = new Set(['.appimage', '.dmg', '.exe', '.msi', '.deb', '.rpm']);
-const BUNDLE_ROOT = resolve('tauri/target');
+const BUNDLE_DIRECTORY_NAME = 'bundle';
+const BUNDLE_ROOT = resolve('tauri/target/release');
 const TAURI_ROOT = resolve('tauri');
+const IS_WINDOWS = process.platform === 'win32';
+const NPM_CLI_FALLBACK = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+const TAURI_CLI = resolve('node_modules', '@tauri-apps', 'cli', 'tauri.js');
 
 /**
  * 执行 Tauri 打包命令，并将命令行参数透传给 Tauri CLI
  * @returns {number} Tauri 命令的退出码
  */
 function buildClient() {
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const frontendResult = spawnSync(npmCommand, ['run', 'build:production'], {
+  const npmCommand = resolveNpmCommand();
+  const frontendResult = spawnSync(npmCommand.command, npmCommand.args.concat(['run', 'build:production']), {
     stdio: 'inherit',
   });
 
@@ -23,15 +27,15 @@ function buildClient() {
   }
   if (frontendResult.status !== 0) return frontendResult.status ?? 1;
 
-  const tauriCommand = process.platform === 'win32'
-    ? join('..', 'node_modules', '.bin', 'tauri.cmd')
-    : join('..', 'node_modules', '.bin', 'tauri');
-  const tauriResult = spawnSync(tauriCommand, [
+  const tauriCommand = resolveTauriCommand();
+  const tauriArgs = tauriCommand.args.concat([
     'build',
     '--config',
     JSON.stringify({ build: { beforeBuildCommand: '' } }),
-    ...process.argv.slice(2),
-  ], {
+  ]);
+  tauriArgs.push(...process.argv.slice(2));
+
+  const tauriResult = spawnSync(tauriCommand.command, tauriArgs, {
     cwd: TAURI_ROOT,
     stdio: 'inherit',
   });
@@ -42,6 +46,33 @@ function buildClient() {
   }
 
   return tauriResult.status ?? 1;
+}
+
+function resolveNpmCommand() {
+  if (!IS_WINDOWS) {
+    return { command: 'npm', args: [] };
+  }
+
+  const npmCli = process.env.npm_execpath || NPM_CLI_FALLBACK;
+  if (existsSync(npmCli)) {
+    return { command: process.execPath, args: [npmCli] };
+  }
+
+  return {
+    command: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', 'npm.cmd'],
+  };
+}
+
+function resolveTauriCommand() {
+  if (IS_WINDOWS && existsSync(TAURI_CLI)) {
+    return { command: process.execPath, args: [TAURI_CLI] };
+  }
+
+  return {
+    command: IS_WINDOWS ? join('..', 'node_modules', '.bin', 'tauri.cmd') : join('..', 'node_modules', '.bin', 'tauri'),
+    args: [],
+  };
 }
 
 /**
@@ -61,6 +92,7 @@ function findArtifacts(directory) {
     const artifactPath = join(directory, entry.name);
     if (entry.isDirectory()) {
       if (entry.name.endsWith('.app')) return [artifactPath];
+      if (resolve(directory) === BUNDLE_ROOT && entry.name !== BUNDLE_DIRECTORY_NAME) return [];
       return findArtifacts(artifactPath);
     }
 
