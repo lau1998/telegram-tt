@@ -4,8 +4,11 @@ import { dirname, join, resolve } from 'path';
 
 const BUNDLE_FILE_EXTENSIONS = new Set(['.appimage', '.dmg', '.exe', '.msi', '.deb', '.rpm']);
 const BUNDLE_DIRECTORY_NAME = 'bundle';
-const BUNDLE_ROOT = resolve('tauri/target/release');
 const TAURI_ROOT = resolve('tauri');
+const RELEASE_DIRECTORY_NAME = 'release';
+const TARGET_OPTION = '--target';
+const TAURI_ARGS = process.argv.slice(2);
+const BUNDLE_ROOT = resolveBundleRoot(TAURI_ARGS);
 const IS_WINDOWS = process.platform === 'win32';
 const NPM_CLI_FALLBACK = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
 const TAURI_CLI = resolve('node_modules', '@tauri-apps', 'cli', 'tauri.js');
@@ -33,7 +36,7 @@ function buildClient() {
     '--config',
     JSON.stringify({ build: { beforeBuildCommand: '' } }),
   ]);
-  tauriArgs.push(...process.argv.slice(2));
+  tauriArgs.push(...TAURI_ARGS);
 
   const tauriResult = spawnSync(tauriCommand.command, tauriArgs, {
     cwd: TAURI_ROOT,
@@ -73,6 +76,36 @@ function resolveTauriCommand() {
     command: IS_WINDOWS ? join('..', 'node_modules', '.bin', 'tauri.cmd') : join('..', 'node_modules', '.bin', 'tauri'),
     args: [],
   };
+}
+
+/**
+ * 根据 Tauri 的目标参数解析当前构建对应的产物根目录
+ * @param {string[]} args 传递给 Tauri CLI 的参数
+ * @returns {string} 当前构建对应的 release 目录
+ */
+function resolveBundleRoot(args) {
+  const target = resolveTarget(args);
+  const targetPath = target
+    ? join('target', target, RELEASE_DIRECTORY_NAME)
+    : join('target', RELEASE_DIRECTORY_NAME);
+
+  return resolve(TAURI_ROOT, targetPath);
+}
+
+/**
+ * 从 Tauri CLI 参数中提取编译目标三元组
+ * @param {string[]} args 传递给 Tauri CLI 的参数
+ * @returns {string|undefined} 编译目标三元组
+ */
+function resolveTarget(args) {
+  const targetIndex = args.indexOf(TARGET_OPTION);
+  if (targetIndex >= 0) {
+    return args[targetIndex + 1];
+  }
+
+  const targetPrefix = `${TARGET_OPTION}=`;
+  const targetArgument = args.find((arg) => arg.startsWith(targetPrefix));
+  return targetArgument?.slice(targetPrefix.length);
 }
 
 /**
