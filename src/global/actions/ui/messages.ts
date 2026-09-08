@@ -570,6 +570,8 @@ addActionHandler('openForwardMenu', (global, actions, payload): ActionReturnType
       messageIds: resolvedMessageIds,
       storyId,
       withMyScore,
+      // 默认以无来源复制方式发送，媒体由 Telegram 服务端复用原消息媒体
+      noAuthors: true,
     },
     isShareMessageModalShown: true,
   }, tabId);
@@ -581,7 +583,8 @@ addActionHandler('changeRecipient', (global, actions, payload): ActionReturnType
     forwardMessages: {
       ...selectTabState(global, tabId).forwardMessages,
       toChatId: undefined,
-      noAuthors: false,
+      // 更换收件人时继续保持无来源复制方式
+      noAuthors: true,
       noCaptions: false,
     },
     isShareMessageModalShown: true,
