@@ -49,6 +49,7 @@ import {
   selectCurrentChat,
   selectCurrentMessageList,
   selectForwardedMessageIdsByGroupId,
+  selectHasProtectedMessage,
   selectIsRightColumnShown,
   selectIsViewportNewest,
   selectMessageIdsByGroupId,
@@ -564,6 +565,9 @@ addActionHandler('openForwardMenu', (global, actions, payload): ActionReturnType
   }
   const resolvedMessageIds = groupedMessageIds || messageIds;
   if (resolvedMessageIds && !selectCanForwardMessages(global, fromChatId, resolvedMessageIds)) return;
+  const shouldUseCopyForward = Boolean(
+    isCopyForward || selectHasProtectedMessage(global, fromChatId, resolvedMessageIds),
+  );
 
   return updateTabState(global, {
     forwardMessages: {
@@ -571,8 +575,8 @@ addActionHandler('openForwardMenu', (global, actions, payload): ActionReturnType
       messageIds: resolvedMessageIds,
       storyId,
       withMyScore,
-      isCopyForward,
-      noAuthors: isCopyForward || undefined,
+      isCopyForward: shouldUseCopyForward || undefined,
+      noAuthors: shouldUseCopyForward || undefined,
     },
     isShareMessageModalShown: true,
   }, tabId);

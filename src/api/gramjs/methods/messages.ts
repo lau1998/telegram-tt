@@ -2,7 +2,6 @@ import { Api as GramJs } from '../../../lib/gramjs';
 import { RPCError } from '../../../lib/gramjs/errors';
 import { generateRandomBigInt } from '../../../lib/gramjs/Helpers';
 
-import type { DownloadableMedia } from '../../../global/helpers';
 import type {
   ForwardMessagesParams,
   SendMessageParams,
@@ -13,7 +12,6 @@ import type {
   ApiAttachment,
   ApiChat,
   ApiComposedMessageWithAI,
-  ApiDimensions,
   ApiFormattedText,
   ApiGlobalMessageSearchType,
   ApiInputAiComposeTone,
@@ -29,7 +27,6 @@ import type {
   ApiNewMediaTodo,
   ApiOnProgress,
   ApiPeer,
-  ApiPhoto,
   ApiReaction,
   ApiSearchPostsFlood,
   ApiSendMessageAction,
@@ -42,11 +39,7 @@ import type {
   ApiWebPage,
   MediaContent,
 } from '../../types';
-import {
-  ApiMediaFormat,
-  MAIN_THREAD_ID,
-  MESSAGE_DELETED,
-} from '../../types';
+import { MAIN_THREAD_ID, MESSAGE_DELETED } from '../../types';
 
 import {
   DEBUG,
@@ -135,7 +128,6 @@ import { processMessageAndUpdateThreadInfo } from '../updates/entityProcessor';
 import { processAffectedHistory, updateChannelState } from '../updates/updateManager';
 import { requestChatUpdate } from './chats';
 import {
-  downloadMedia as downloadTelegramMedia,
   handleGramJsUpdate,
   invokeRequest,
   uploadFile,
@@ -143,7 +135,6 @@ import {
 
 const FAST_SEND_TIMEOUT = 1000;
 const INPUT_WAVEFORM_LENGTH = 63;
-const COPY_MEDIA_PROGRESS: ApiOnProgress = () => undefined;
 const FORWARD_LOG_PREFIX = '[TelegramTT Forward]';
 
 /**
@@ -195,55 +186,6 @@ function getForwardLogDetails(message: ApiMessage) {
   if (content.text) return { contentType: 'text', directTransport: 'SendMessage' };
 
   return { contentType: 'other', directTransport: 'unknown' };
-}
-
-/**
- * 根据媒体类型生成 worker 可用的下载哈希
- */
-function getCopyMediaHash(media: DownloadableMedia) {
-  if (!('id' in media) || !media.id) return undefined;
-
-  if (media.mediaType === 'photo') {
-    return media.isVideo ? `photo${media.id}?size=u` : `photo${media.id}`;
-  }
-
-  if (media.mediaType === 'document') return `document${media.id}`;
-
-  return `document${media.id}?download`;
-}
-
-/**
- * 根据媒体元数据生成重新上传时使用的文件名
- */
-function getCopyMediaFilename(media: DownloadableMedia) {
-  if ('fileName' in media && media.fileName) return media.fileName;
-
-  if (media.mediaType === 'sticker') {
-    const extension = media.isLottie ? 'tgs' : media.isVideo ? 'webm' : 'webp';
-    return `${media.id}.${extension}`;
-  }
-
-  if (media.mediaType === 'photo') {
-    return `${media.id}.${media.isVideo ? 'mp4' : 'jpg'}`;
-  }
-
-  if (media.mediaType === 'voice') return `${media.id}.ogg`;
-
-  if ('id' in media && media.id) return media.id;
-
-  return `message-${media.mediaType}`;
-}
-
-/**
- * 按现有媒体尺寸优先级提取照片的完整尺寸
- */
-function getCopyPhotoDimensions(photo: Pick<ApiPhoto, 'sizes' | 'thumbnail'>): ApiDimensions | undefined {
-  return photo.sizes.find((size) => size.type === 'w')
-    || photo.sizes.find((size) => size.type === 'y')
-    || photo.sizes.find((size) => size.type === 'x')
-    || photo.sizes.find((size) => size.type === 'm')
-    || photo.sizes.find((size) => size.type === 's')
-    || photo.thumbnail;
 }
 
 type TranslateTextParams = ({
@@ -2467,6 +2409,15 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
 
   const priceInStars = messagePriceInStars ? messagePriceInStars * messageIds.length : undefined;
 
+  if (isCopyForward) {
+    logForwardStep('已进入复制转发模式，跳过原生转发', {
+      transport: 'messages.SendMedia/messages.SendMessage',
+      messageIds,
+    });
+    await copyForwardedMessages(params, localMessages);
+    return;
+  }
+
   const randomIds = messageIds.map(() => generateRandomBigInt());
   try {
     logForwardStep('尝试原生转发', {
@@ -2553,41 +2504,37 @@ async function copyForwardedMessage(
   const inputMedia = buildInputMediaFromContent(message.content, params.polls?.[String(message.id)]);
   const text = noCaptions && inputMedia ? undefined : message.content.text;
   const logDetails = getForwardLogDetails(message);
+  const hasMedia = Boolean(
+    message.content.photo || message.content.video || message.content.document
+    || message.content.sticker || message.content.audio || message.content.voice,
+  );
   try {
-    let update;
-    try {
-      logForwardStep('尝试复用原媒体复制发送', {
-        messageId: message.id,
-        transport: inputMedia ? `messages.SendMedia/${logDetails.directTransport}` : 'messages.SendMessage',
-        ...logDetails,
-      });
-      update = await sendCopiedMessageRequest(params, message, text, inputMedia);
-      logForwardStep('复用原媒体发送成功', {
-        messageId: message.id,
-        transport: inputMedia ? `messages.SendMedia/${logDetails.directTransport}` : 'messages.SendMessage',
-      });
-    } catch (error: any) {
-      logForwardStep('复用原媒体失败，准备下载并重新上传', {
+    if (hasMedia && !inputMedia) {
+      const error = new Error('Original media reference is unavailable');
+      logForwardStep('原媒体引用不可用，跳过下载重传', {
         messageId: message.id,
         ...logDetails,
-        error: error.errorMessage || error.message || 'unknown',
       });
-      const uploadedMedia = await uploadCopiedMedia(message, localMessage);
-      if (!uploadedMedia) throw error;
-
-      logForwardStep('媒体重新上传完成，发送上传后的媒体', {
-        messageId: message.id,
-        transport: `messages.SendMedia/${uploadedMedia.className || 'unknown'}`,
-      });
-      update = await sendCopiedMessageRequest(params, message, text, uploadedMedia);
+      throw error;
     }
+
+    logForwardStep('尝试复用原媒体复制发送', {
+      messageId: message.id,
+      transport: inputMedia ? `messages.SendMedia/${logDetails.directTransport}` : 'messages.SendMessage',
+      ...logDetails,
+    });
+    const update = await sendCopiedMessageRequest(params, message, text, inputMedia);
+    logForwardStep('复用原媒体发送成功', {
+      messageId: message.id,
+      transport: inputMedia ? `messages.SendMedia/${logDetails.directTransport}` : 'messages.SendMessage',
+    });
 
     if (!update) return false;
 
     handleLocalMessageUpdate(localMessage, update);
     return true;
   } catch (error: any) {
-    logForwardStep('复制发送失败', {
+    logForwardStep('复制发送失败，不下载重传', {
       messageId: message.id,
       ...logDetails,
       error: error.errorMessage || error.message || 'unknown',
@@ -2651,111 +2598,6 @@ async function sendCopiedMessageRequest(
     shouldThrow: true,
     shouldIgnoreUpdates: true,
   });
-}
-
-/**
- * 下载原媒体并重新上传，在直接复用媒体引用也被服务端拒绝时提供最后兜底
- */
-async function uploadCopiedMedia(message: ApiMessage, localMessage: ApiMessage) {
-  const media = getMessageMediaForCopy(message);
-  if (!media) {
-    logForwardStep('没有可下载的媒体，无法执行重新上传', { messageId: message.id });
-    return undefined;
-  }
-
-  const mediaHash = getCopyMediaHash(media);
-  if (!mediaHash) {
-    logForwardStep('无法生成媒体下载标识，无法执行重新上传', {
-      messageId: message.id,
-      mediaType: media.mediaType,
-    });
-    return undefined;
-  }
-
-  logForwardStep('开始下载原媒体', {
-    messageId: message.id,
-    mediaType: media.mediaType,
-    mediaHash,
-    mediaSize: 'size' in media ? media.size : undefined,
-  });
-
-  const downloaded = await downloadTelegramMedia({
-    url: mediaHash,
-    mediaFormat: ApiMediaFormat.BlobUrl,
-  }, COPY_MEDIA_PROGRESS);
-  if (!downloaded?.dataBlob || !(downloaded.dataBlob instanceof Blob)) {
-    logForwardStep('原媒体下载失败', { messageId: message.id, mediaHash });
-    return undefined;
-  }
-
-  logForwardStep('原媒体下载完成，开始重新上传', {
-    messageId: message.id,
-    downloadedSize: downloaded.dataBlob.size,
-  });
-
-  const blobUrl = URL.createObjectURL(downloaded.dataBlob);
-  try {
-    const attachment = buildCopiedAttachment(media, blobUrl);
-    const uploadedMedia = await uploadMedia(localMessage, attachment, COPY_MEDIA_PROGRESS);
-    logForwardStep('原媒体重新上传成功', {
-      messageId: message.id,
-      uploadedTransport: uploadedMedia?.className || 'unknown',
-    });
-    return uploadedMedia;
-  } finally {
-    URL.revokeObjectURL(blobUrl);
-  }
-}
-
-/**
- * 从消息内容中提取可下载的 Telegram 媒体
- */
-function getMessageMediaForCopy(message: ApiMessage): DownloadableMedia | undefined {
-  const {
-    photo, video, document, sticker, audio, voice,
-  } = message.content;
-  return photo || video || document || sticker || audio || voice;
-}
-
-/**
- * 将已下载的媒体转换为现有上传流程所需的附件描述
- */
-function buildCopiedAttachment(media: DownloadableMedia, blobUrl: string): ApiAttachment {
-  const dimensions = media.mediaType === 'photo'
-    ? getCopyPhotoDimensions(media)
-    : media.mediaType === 'video'
-      ? { width: media.width || 0, height: media.height || 0 }
-      : media.mediaType === 'document' ? media.mediaSize : undefined;
-  const mimeType = 'mimeType' in media
-    ? media.mimeType
-    : media.mediaType === 'photo' ? 'image/jpeg'
-      : media.mediaType === 'voice' ? 'audio/ogg'
-        : 'application/octet-stream';
-
-  return {
-    blobUrl,
-    filename: getCopyMediaFilename(media),
-    mimeType,
-    size: 'size' in media ? media.size : 0,
-    quick: dimensions && {
-      width: dimensions.width,
-      height: dimensions.height,
-      duration: media.mediaType === 'video' ? media.duration : undefined,
-    },
-    audio: media.mediaType === 'audio' ? {
-      duration: media.duration,
-      title: media.title,
-      performer: media.performer,
-    } : undefined,
-    voice: media.mediaType === 'voice' ? {
-      duration: media.duration,
-      waveform: media.waveform || [],
-    } : undefined,
-    shouldSendAsFile: media.mediaType === 'document' ? true : undefined,
-    shouldSendAsSpoiler: media.mediaType === 'photo' || media.mediaType === 'video'
-      ? (media.isSpoiler ? true : undefined) : undefined,
-    isRoundVideo: media.mediaType === 'video' ? media.isRound : undefined,
-  };
 }
 
 export async function forwardMessages(params: ForwardMessagesParams) {
