@@ -55,6 +55,7 @@ type StateProps = {
   sender?: ApiPeer;
   shouldAnimate?: boolean;
   forwardedMessagesCount?: number;
+  isCopyForward?: boolean;
   noAuthors?: boolean;
   noCaptions?: boolean;
   forwardsHaveCaptions?: boolean;
@@ -181,6 +182,7 @@ const ComposerEmbeddedMessage = (props: OwnProps & StateProps) => {
     senderChat,
     isMediaNsfw,
     noAuthors,
+    isCopyForward,
     noCaptions,
     forwardsHaveCaptions,
     forwardedMessagesCount: frozenForwardedMessagesCount,
@@ -400,26 +402,30 @@ const ComposerEmbeddedMessage = (props: OwnProps & StateProps) => {
           >
             {isForwardingRendering && (
               <>
-                <MenuItem
-                  icon={!noAuthors ? 'message-succeeded' : undefined}
-                  customIcon={noAuthors ? <Icon name="placeholder" /> : undefined}
+                {!isCopyForward && (
+                  <>
+                    <MenuItem
+                      icon={!noAuthors ? 'message-succeeded' : undefined}
+                      customIcon={noAuthors ? <Icon name="placeholder" /> : undefined}
 
-                  onClick={() => setForwardNoAuthors({
-                    noAuthors: false,
-                  })}
-                >
-                  {oldLang(frozenForwardedMessagesCount > 1 ? 'ShowSenderNames' : 'ShowSendersName')}
-                </MenuItem>
-                <MenuItem
-                  icon={noAuthors ? 'message-succeeded' : undefined}
-                  customIcon={!noAuthors ? <Icon name="placeholder" /> : undefined}
+                      onClick={() => setForwardNoAuthors({
+                        noAuthors: false,
+                      })}
+                    >
+                      {oldLang(frozenForwardedMessagesCount > 1 ? 'ShowSenderNames' : 'ShowSendersName')}
+                    </MenuItem>
+                    <MenuItem
+                      icon={noAuthors ? 'message-succeeded' : undefined}
+                      customIcon={!noAuthors ? <Icon name="placeholder" /> : undefined}
 
-                  onClick={() => setForwardNoAuthors({
-                    noAuthors: true,
-                  })}
-                >
-                  {oldLang(frozenForwardedMessagesCount > 1 ? 'HideSenderNames' : 'HideSendersName')}
-                </MenuItem>
+                      onClick={() => setForwardNoAuthors({
+                        noAuthors: true,
+                      })}
+                    >
+                      {oldLang(frozenForwardedMessagesCount > 1 ? 'HideSenderNames' : 'HideSendersName')}
+                    </MenuItem>
+                  </>
+                )}
                 {forwardsHaveCaptions && (
                   <>
                     <MenuSeparator />
@@ -495,7 +501,7 @@ export default memo(withGlobal<OwnProps>(
   }): Complete<StateProps> => {
     const {
       forwardMessages: {
-        fromChatId, toChatId, messageIds: forwardMessageIds, noAuthors, noCaptions,
+        fromChatId, toChatId, messageIds: forwardMessageIds, isCopyForward, noAuthors, noCaptions,
       },
       isShareMessageModalShown: isModalShown,
       shouldPreventComposerAnimation,
@@ -577,6 +583,7 @@ export default memo(withGlobal<OwnProps>(
       sender,
       shouldAnimate,
       forwardedMessagesCount: isForwarding ? forwardMessageIds!.length : undefined,
+      isCopyForward,
       noAuthors,
       noCaptions,
       forwardsHaveCaptions,

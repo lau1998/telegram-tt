@@ -446,6 +446,7 @@ export type TabState = {
     toChatId?: string;
     toThreadId?: ThreadId;
     withMyScore?: boolean;
+    isCopyForward?: boolean;
     noAuthors?: boolean;
     noCaptions?: boolean;
   };

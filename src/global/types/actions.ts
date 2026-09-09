@@ -2122,8 +2122,19 @@ export interface ActionPayloads {
     storyId?: number;
     groupedId?: string;
     withMyScore?: boolean;
+    isCopyForward?: boolean;
   } & WithTabId;
-  openForwardMenuForSelectedMessages: WithTabId | undefined;
+  openCopyForwardMenu: {
+    fromChatId: string;
+    messageIds?: number[];
+    storyId?: number;
+    groupedId?: string;
+    withMyScore?: boolean;
+  } & WithTabId;
+  openForwardMenuForSelectedMessages: {
+    isCopyForward?: boolean;
+  } & WithTabId | undefined;
+  openCopyForwardMenuForSelectedMessages: WithTabId | undefined;
   setForwardChatOrTopic: {
     chatId: string;
     topicId?: number;

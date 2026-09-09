@@ -555,7 +555,8 @@ addActionHandler('openReplyMenu', (global, actions, payload): ActionReturnType =
 
 addActionHandler('openForwardMenu', (global, actions, payload): ActionReturnType => {
   const {
-    fromChatId, messageIds, storyId, groupedId, withMyScore, tabId = getCurrentTabId(),
+    fromChatId, messageIds, storyId, groupedId, withMyScore, isCopyForward,
+    tabId = getCurrentTabId(),
   } = payload;
   let groupedMessageIds;
   if (groupedId) {
@@ -570,21 +571,30 @@ addActionHandler('openForwardMenu', (global, actions, payload): ActionReturnType
       messageIds: resolvedMessageIds,
       storyId,
       withMyScore,
-      // 默认以无来源复制方式发送，媒体由 Telegram 服务端复用原消息媒体
-      noAuthors: true,
+      isCopyForward,
+      noAuthors: isCopyForward || undefined,
     },
     isShareMessageModalShown: true,
   }, tabId);
 });
 
+addActionHandler('openCopyForwardMenu', (global, actions, payload): ActionReturnType => {
+  const { tabId = getCurrentTabId() } = payload;
+  actions.openForwardMenu({
+    ...payload,
+    isCopyForward: true,
+    tabId,
+  });
+});
+
 addActionHandler('changeRecipient', (global, actions, payload): ActionReturnType => {
   const { tabId = getCurrentTabId() } = payload || {};
+  const tabState = selectTabState(global, tabId);
   return updateTabState(global, {
     forwardMessages: {
-      ...selectTabState(global, tabId).forwardMessages,
+      ...tabState.forwardMessages,
       toChatId: undefined,
-      // 更换收件人时继续保持无来源复制方式
-      noAuthors: true,
+      noAuthors: tabState.forwardMessages.isCopyForward || undefined,
       noCaptions: false,
     },
     isShareMessageModalShown: true,
@@ -594,23 +604,25 @@ addActionHandler('changeRecipient', (global, actions, payload): ActionReturnType
 addActionHandler('setForwardNoAuthors', (global, actions, payload): ActionReturnType => {
   const { noAuthors, tabId = getCurrentTabId() } = payload;
   const tabState = selectTabState(global, tabId);
+  const shouldHideAuthors = tabState.forwardMessages.isCopyForward || noAuthors;
   return updateTabState(global, {
     forwardMessages: {
       ...tabState.forwardMessages,
-      noAuthors,
+      noAuthors: shouldHideAuthors,
       // `noCaptions` cannot be true when `noAuthors` is false
-      noCaptions: noAuthors && tabState.forwardMessages.noCaptions,
+      noCaptions: shouldHideAuthors && tabState.forwardMessages.noCaptions,
     },
   }, tabId);
 });
 
 addActionHandler('setForwardNoCaptions', (global, actions, payload): ActionReturnType => {
   const { noCaptions, tabId = getCurrentTabId() } = payload;
+  const tabState = selectTabState(global, tabId);
   return updateTabState(global, {
     forwardMessages: {
-      ...selectTabState(global, tabId).forwardMessages,
+      ...tabState.forwardMessages,
       noCaptions,
-      noAuthors: noCaptions, // On other clients `noAuthors` updates together with `noCaptions`
+      noAuthors: tabState.forwardMessages.isCopyForward || noCaptions,
     },
   }, tabId);
 });
@@ -627,7 +639,7 @@ addActionHandler('exitForwardMode', (global, actions, payload): ActionReturnType
 });
 
 addActionHandler('openForwardMenuForSelectedMessages', (global, actions, payload): ActionReturnType => {
-  const { tabId = getCurrentTabId() } = payload || {};
+  const { isCopyForward, tabId = getCurrentTabId() } = payload || {};
   const tabState = selectTabState(global, tabId);
   if (!tabState.selectedMessages) {
     return;
@@ -644,7 +656,15 @@ addActionHandler('openForwardMenuForSelectedMessages', (global, actions, payload
     return;
   }
 
-  actions.openForwardMenu({ fromChatId, messageIds: forwardableMessageIds, tabId });
+  actions.openForwardMenu({ fromChatId, messageIds: forwardableMessageIds, isCopyForward, tabId });
+});
+
+addActionHandler('openCopyForwardMenuForSelectedMessages', (global, actions, payload): ActionReturnType => {
+  const { tabId = getCurrentTabId() } = payload || {};
+  actions.openForwardMenuForSelectedMessages({
+    isCopyForward: true,
+    tabId,
+  });
 });
 
 addActionHandler('cancelMediaDownload', (global, actions, payload): ActionReturnType => {

@@ -594,6 +594,7 @@ export interface LangPair {
   'WebAppAddToAttachmentAdd': undefined;
   'AccActionDownload': undefined;
   'Forward': undefined;
+  'CopyForward': undefined;
   'MediaZoomOut': undefined;
   'MediaZoomIn': undefined;
   'PeerInfoReportProfileVideo': undefined;

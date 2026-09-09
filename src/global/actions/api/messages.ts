@@ -2018,7 +2018,8 @@ function buildForwardedPolls(global: GlobalState, messages: ApiMessage[]) {
 
 async function executeForwardMessages(global: GlobalState, sendParams: SendMessageParams, tabId: number) {
   const {
-    fromChatId, messageIds, toChatId, withMyScore, noAuthors, noCaptions, toThreadId = MAIN_THREAD_ID,
+    fromChatId, messageIds, toChatId, withMyScore, isCopyForward, noAuthors, noCaptions,
+    toThreadId = MAIN_THREAD_ID,
   } = selectTabState(global, tabId).forwardMessages;
   const { messagePriceInStars, isSilent, scheduledAt, scheduleRepeatPeriod, effectId, attachments } = sendParams;
   const isForwardOnly = !sendParams.text && !sendParams.richMessage && !attachments?.length;
@@ -2063,7 +2064,8 @@ async function executeForwardMessages(global: GlobalState, sendParams: SendMessa
         scheduleRepeatPeriod,
         sendAs,
         withMyScore,
-        noAuthors,
+        isCopyForward,
+        noAuthors: isCopyForward || noAuthors,
         noCaptions,
         privateForwardName,
         isCurrentUserPremium,
@@ -3242,6 +3244,7 @@ interface ForwardToChatOptions {
   serviceMessages: ApiMessage[];
   comment?: string;
   withMyScore?: boolean;
+  isCopyForward?: boolean;
   noAuthors?: boolean;
   noCaptions?: boolean;
   isCurrentUserPremium: boolean;
@@ -3256,6 +3259,7 @@ function forwardMessagesToChat({
   serviceMessages,
   comment,
   withMyScore,
+  isCopyForward,
   noAuthors,
   noCaptions,
   isCurrentUserPremium,
@@ -3298,7 +3302,8 @@ function forwardMessagesToChat({
         isSilent: true,
         sendAs,
         withMyScore,
-        noAuthors,
+        isCopyForward,
+        noAuthors: isCopyForward || noAuthors,
         noCaptions,
         privateForwardName,
         isCurrentUserPremium,
@@ -3334,7 +3339,7 @@ addActionHandler('forwardToMultipleChats', (global, actions, payload): ActionRet
   const { targets, comment, tabId = getCurrentTabId() } = payload;
 
   const {
-    fromChatId, messageIds, withMyScore, noAuthors, noCaptions,
+    fromChatId, messageIds, withMyScore, isCopyForward, noAuthors, noCaptions,
   } = selectTabState(global, tabId).forwardMessages;
 
   const fromChat = fromChatId ? selectChat(global, fromChatId) : undefined;
@@ -3370,6 +3375,7 @@ addActionHandler('forwardToMultipleChats', (global, actions, payload): ActionRet
       serviceMessages,
       comment,
       withMyScore,
+      isCopyForward,
       noAuthors,
       noCaptions,
       isCurrentUserPremium,

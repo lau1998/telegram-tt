@@ -128,6 +128,7 @@ type OwnProps = {
   onPin?: NoneToVoidFunction;
   onUnpin?: NoneToVoidFunction;
   onForward?: NoneToVoidFunction;
+  onCopyForward?: NoneToVoidFunction;
   onDelete?: NoneToVoidFunction;
   onFaveSticker?: NoneToVoidFunction;
   onReport?: NoneToVoidFunction;
@@ -236,6 +237,7 @@ const MessageContextMenu = ({
   onPin,
   onUnpin,
   onForward,
+  onCopyForward,
   onDelete,
   onFaveSticker,
   onReport,
@@ -598,7 +600,12 @@ const MessageContextMenu = ({
             {lang('MediaStreamSave')}
           </MenuItem>
         )}
-        {canForward && <MenuItem icon="forward" onClick={onForward}>{oldLang('Forward')}</MenuItem>}
+        {canForward && (
+          <>
+            <MenuItem icon="forward" onClick={onForward}>{oldLang('Forward')}</MenuItem>
+            <MenuItem icon="copy" onClick={onCopyForward}>{lang('CopyForward')}</MenuItem>
+          </>
+        )}
         {canSelect && <MenuItem icon="select" onClick={onSelect}>{oldLang('Common.Select')}</MenuItem>}
         {canReport && <MenuItem icon="flag" onClick={onReport}>{oldLang('lng_context_report_msg')}</MenuItem>}
         {canDelete && <MenuItem destructive icon="delete" onClick={onDelete}>{oldLang('Delete')}</MenuItem>}

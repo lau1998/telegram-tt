@@ -78,6 +78,7 @@ const MessageSelectToolbar = ({
   const {
     exitMessageSelectMode,
     openForwardMenuForSelectedMessages,
+    openCopyForwardMenuForSelectedMessages,
     downloadSelectedMessages,
     copySelectedMessages,
     reportMessages,
@@ -261,9 +262,12 @@ const MessageSelectToolbar = ({
                     renderButton('copy', oldLang('lng_context_copy_selected_items'), handleCopy)
                   )}
                   {rendering.messageListType !== 'scheduled' && rendering.canForwardMessages && (
-                    renderButton(
-                      'forward', oldLang('Chat.ForwardActionHeader'), openForwardMenuForSelectedMessages,
-                    )
+                    <>
+                      {renderButton(
+                        'forward', oldLang('Chat.ForwardActionHeader'), openForwardMenuForSelectedMessages,
+                      )}
+                      {renderButton('copy', lang('CopyForward'), openCopyForwardMenuForSelectedMessages)}
+                    </>
                   )}
                 </div>
               )}

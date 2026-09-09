@@ -860,6 +860,7 @@ export type ForwardMessagesParams = {
   scheduleRepeatPeriod?: number;
   sendAs?: ApiPeer;
   withMyScore?: boolean;
+  isCopyForward?: boolean;
   noAuthors?: boolean;
   noCaptions?: boolean;
   privateForwardName?: string;

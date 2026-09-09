@@ -2354,7 +2354,7 @@ export async function fetchExtendedMedia({
 export function forwardMessagesLocal(params: ForwardMessagesParams) {
   const {
     toChat, toThreadId, messages,
-    scheduledAt, scheduleRepeatPeriod, sendAs, noAuthors, noCaptions,
+    scheduledAt, scheduleRepeatPeriod, sendAs, isCopyForward, noAuthors, noCaptions,
     privateForwardName, isCurrentUserPremium, wasDrafted, lastMessageId, effectId,
   } = params;
 
@@ -2368,7 +2368,7 @@ export function forwardMessagesLocal(params: ForwardMessagesParams) {
       message,
       scheduledAt,
       scheduleRepeatPeriod,
-      noAuthors,
+      noAuthors: isCopyForward || noAuthors,
       noCaptions,
       privateForwardName,
       isCurrentUserPremium,
@@ -2392,7 +2392,7 @@ export function forwardMessagesLocal(params: ForwardMessagesParams) {
 export async function forwardApiMessages(params: ForwardMessagesParams) {
   const {
     fromChat, toChat, toThreadId, isSilent,
-    scheduledAt, scheduleRepeatPeriod, sendAs, withMyScore, noAuthors, noCaptions,
+    scheduledAt, scheduleRepeatPeriod, sendAs, withMyScore, isCopyForward, noAuthors, noCaptions,
     forwardedLocalMessagesSlice, messagePriceInStars, effectId,
   } = params;
 
@@ -2413,7 +2413,7 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
       id: messageIds,
       withMyScore: withMyScore || undefined,
       silent: isSilent || undefined,
-      dropAuthor: noAuthors || undefined,
+      dropAuthor: isCopyForward || noAuthors || undefined,
       dropMediaCaptions: noCaptions || undefined,
       ...(toThreadId && { topMsgId: Number(toThreadId) }),
       ...(scheduledAt && { scheduleDate: scheduledAt }),

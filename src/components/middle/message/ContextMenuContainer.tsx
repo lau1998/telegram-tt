@@ -261,6 +261,7 @@ const ContextMenuContainer = ({
     startEditingMessage,
     pinMessage,
     openForwardMenu,
+    openCopyForwardMenu,
     openReplyMenu,
     faveSticker,
     unfaveSticker,
@@ -574,6 +575,16 @@ const ContextMenuContainer = ({
     }
   });
 
+  const handleCopyForward = useLastCallback(() => {
+    closeMenu();
+    if (album?.messages) {
+      const messageIds = album.messages.map(({ id }) => id);
+      openCopyForwardMenu({ fromChatId: message.chatId, messageIds });
+    } else {
+      openCopyForwardMenu({ fromChatId: message.chatId, messageIds: [message.id] });
+    }
+  });
+
   const handleFaveSticker = useLastCallback(() => {
     closeMenu();
     faveSticker({ sticker: message.content.sticker! });
@@ -880,6 +891,7 @@ const ContextMenuContainer = ({
         onPin={handlePin}
         onUnpin={handleUnpin}
         onForward={handleForward}
+        onCopyForward={handleCopyForward}
         onDelete={handleDelete}
         onReport={handleReport}
         onFaveSticker={handleFaveSticker}

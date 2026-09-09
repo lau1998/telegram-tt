@@ -46,6 +46,7 @@ interface StateProps {
   currentUserId?: string;
   isStory?: boolean;
   isForwarding?: boolean;
+  isCopyForward?: boolean;
   fromChatId?: string;
   forwardMessageIds?: number[];
   shouldPaidMessageAutoApprove?: boolean;
@@ -56,6 +57,7 @@ const ForwardRecipientPicker: FC<OwnProps & StateProps> = ({
   currentUserId,
   isStory,
   isForwarding,
+  isCopyForward,
   fromChatId,
   forwardMessageIds,
   shouldPaidMessageAutoApprove,
@@ -327,7 +329,7 @@ const ForwardRecipientPicker: FC<OwnProps & StateProps> = ({
                     { price: formatStarsAsIcon(lang, singleChatStars, { asFont: true }) },
                     { withNodes: true },
                   )
-                  : lang('Forward'))}
+                  : lang(isCopyForward ? 'CopyForward' : 'Forward'))}
             </span>
           </Transition>
         </Button>
@@ -348,7 +350,7 @@ const ForwardRecipientPicker: FC<OwnProps & StateProps> = ({
             className="picker-send-button"
             color="primary"
             onClick={handleForwardToMultiple}
-            ariaLabel={lang('Forward')}
+            ariaLabel={lang(isCopyForward ? 'CopyForward' : 'Forward')}
           >
             {displayedTotalStars > 0 ? (
               <>
@@ -371,8 +373,8 @@ const ForwardRecipientPicker: FC<OwnProps & StateProps> = ({
         </div>
       </div>
     );
-  }, [isForwarding, isStory, selectedCount, showComposer, caption, canCopyLink, displayedTotalStars,
-    paidChatsInfo, handleForwardToMultiple, handleCopyLink, lang, oldLang]);
+  }, [isForwarding, isStory, isCopyForward, selectedCount, showComposer, caption, canCopyLink,
+    displayedTotalStars, paidChatsInfo, handleForwardToMultiple, handleCopyLink, lang, oldLang]);
 
   if (!isOpen && !isShown) {
     return undefined;
@@ -440,13 +442,16 @@ const ForwardRecipientPicker: FC<OwnProps & StateProps> = ({
 };
 
 export default memo(withGlobal<OwnProps>((global): Complete<StateProps> => {
-  const { messageIds, storyId, fromChatId } = selectTabState(global).forwardMessages;
+  const {
+    messageIds, storyId, fromChatId, isCopyForward,
+  } = selectTabState(global).forwardMessages;
   const isForwarding = (messageIds && messageIds.length > 0);
 
   return {
     currentUserId: global.currentUserId,
     isStory: Boolean(storyId),
     isForwarding,
+    isCopyForward,
     fromChatId,
     forwardMessageIds: messageIds,
     shouldPaidMessageAutoApprove: global.settings.byKey.shouldPaidMessageAutoApprove,
