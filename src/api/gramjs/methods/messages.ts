@@ -144,6 +144,58 @@ import {
 const FAST_SEND_TIMEOUT = 1000;
 const INPUT_WAVEFORM_LENGTH = 63;
 const COPY_MEDIA_PROGRESS: ApiOnProgress = () => undefined;
+const FORWARD_LOG_PREFIX = '[TelegramTT Forward]';
+
+/**
+ * 将转发步骤和关键参数输出到浏览器控制台，便于验证实际使用的发送方式
+ */
+function logForwardStep(step: string, details: Record<string, unknown>) {
+  // Worker 中的 `console.info` 会通过现有调试通道同步到浏览器控制台
+  // eslint-disable-next-line no-console
+  console.info(FORWARD_LOG_PREFIX, step, details);
+}
+
+/**
+ * 提取消息类型、媒体大小和直接复制时的媒体传输方式
+ */
+function getForwardLogDetails(message: ApiMessage) {
+  const { content } = message;
+
+  if (content.video) {
+    return {
+      contentType: 'video',
+      mediaSize: content.video.size,
+      directTransport: 'InputMediaDocument',
+    };
+  }
+
+  if (content.photo) return { contentType: 'photo', directTransport: 'InputMediaPhoto' };
+  if (content.document) {
+    return {
+      contentType: 'document',
+      mediaSize: content.document.size,
+      directTransport: 'InputMediaDocument',
+    };
+  }
+  if (content.audio) {
+    return {
+      contentType: 'audio',
+      mediaSize: content.audio.size,
+      directTransport: 'InputMediaDocument',
+    };
+  }
+  if (content.voice) {
+    return {
+      contentType: 'voice',
+      mediaSize: content.voice.size,
+      directTransport: 'InputMediaDocument',
+    };
+  }
+  if (content.sticker) return { contentType: 'sticker', directTransport: 'InputMediaDocument' };
+  if (content.text) return { contentType: 'text', directTransport: 'SendMessage' };
+
+  return { contentType: 'other', directTransport: 'unknown' };
+}
 
 /**
  * 根据媒体类型生成 worker 可用的下载哈希
@@ -2402,10 +2454,26 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
     messageIds, localMessages,
   } = forwardedLocalMessagesSlice;
 
+  logForwardStep('开始转发', {
+    mode: isCopyForward ? 'Copy Forward' : 'Forward',
+    fromChatId: fromChat.id,
+    toChatId: toChat.id,
+    messageIds,
+    messages: params.messages.map((message) => ({
+      messageId: message.id,
+      ...getForwardLogDetails(message),
+    })),
+  });
+
   const priceInStars = messagePriceInStars ? messagePriceInStars * messageIds.length : undefined;
 
   const randomIds = messageIds.map(() => generateRandomBigInt());
   try {
+    logForwardStep('尝试原生转发', {
+      transport: 'messages.ForwardMessages',
+      dropAuthor: Boolean(isCopyForward || noAuthors),
+      messageIds,
+    });
     const update = await invokeRequest(new GramJs.messages.ForwardMessages({
       fromPeer: buildInputPeer(fromChat.id, fromChat.accessHash),
       toPeer: buildInputPeer(toChat.id, toChat.accessHash),
@@ -2430,7 +2498,16 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
       messagesForUpdate[randomIds[index].toString()] = message;
     });
     if (update) handleMultipleLocalMessagesUpdate(messagesForUpdate, update);
+    logForwardStep('原生转发成功', {
+      transport: 'messages.ForwardMessages',
+      messageIds,
+    });
   } catch (error: any) {
+    logForwardStep('原生转发失败，开始复制发送兜底', {
+      transport: 'messages.ForwardMessages',
+      messageIds,
+      error: error.errorMessage || error.message || 'unknown',
+    });
     const hasAttemptedCopy = await copyForwardedMessages(params, localMessages);
     if (hasAttemptedCopy) return;
 
@@ -2449,6 +2526,11 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
  * 使用原消息的媒体引用逐条发送，保留媒体、文本和其他可复制内容的类型
  */
 async function copyForwardedMessages(params: ForwardMessagesParams, localMessages: ApiMessage[]) {
+  logForwardStep('开始逐条复制发送', {
+    transport: 'messages.SendMedia/messages.SendMessage',
+    messageCount: params.messages.length,
+  });
+
   const copiedResults = await Promise.all(params.messages.map((message, index) => {
     const localMessage = localMessages[index];
     if (!localMessage) return Promise.resolve(false);
@@ -2470,14 +2552,33 @@ async function copyForwardedMessage(
   const { noCaptions, toChat } = params;
   const inputMedia = buildInputMediaFromContent(message.content, params.polls?.[String(message.id)]);
   const text = noCaptions && inputMedia ? undefined : message.content.text;
+  const logDetails = getForwardLogDetails(message);
   try {
     let update;
     try {
+      logForwardStep('尝试复用原媒体复制发送', {
+        messageId: message.id,
+        transport: inputMedia ? `messages.SendMedia/${logDetails.directTransport}` : 'messages.SendMessage',
+        ...logDetails,
+      });
       update = await sendCopiedMessageRequest(params, message, text, inputMedia);
+      logForwardStep('复用原媒体发送成功', {
+        messageId: message.id,
+        transport: inputMedia ? `messages.SendMedia/${logDetails.directTransport}` : 'messages.SendMessage',
+      });
     } catch (error: any) {
+      logForwardStep('复用原媒体失败，准备下载并重新上传', {
+        messageId: message.id,
+        ...logDetails,
+        error: error.errorMessage || error.message || 'unknown',
+      });
       const uploadedMedia = await uploadCopiedMedia(message, localMessage);
       if (!uploadedMedia) throw error;
 
+      logForwardStep('媒体重新上传完成，发送上传后的媒体', {
+        messageId: message.id,
+        transport: `messages.SendMedia/${uploadedMedia.className || 'unknown'}`,
+      });
       update = await sendCopiedMessageRequest(params, message, text, uploadedMedia);
     }
 
@@ -2486,6 +2587,11 @@ async function copyForwardedMessage(
     handleLocalMessageUpdate(localMessage, update);
     return true;
   } catch (error: any) {
+    logForwardStep('复制发送失败', {
+      messageId: message.id,
+      ...logDetails,
+      error: error.errorMessage || error.message || 'unknown',
+    });
     sendApiUpdate({
       '@type': localMessage.isScheduled ? 'updateScheduledMessageSendFailed' : 'updateMessageSendFailed',
       chatId: toChat.id,
@@ -2552,21 +2658,50 @@ async function sendCopiedMessageRequest(
  */
 async function uploadCopiedMedia(message: ApiMessage, localMessage: ApiMessage) {
   const media = getMessageMediaForCopy(message);
-  if (!media) return undefined;
+  if (!media) {
+    logForwardStep('没有可下载的媒体，无法执行重新上传', { messageId: message.id });
+    return undefined;
+  }
 
   const mediaHash = getCopyMediaHash(media);
-  if (!mediaHash) return undefined;
+  if (!mediaHash) {
+    logForwardStep('无法生成媒体下载标识，无法执行重新上传', {
+      messageId: message.id,
+      mediaType: media.mediaType,
+    });
+    return undefined;
+  }
+
+  logForwardStep('开始下载原媒体', {
+    messageId: message.id,
+    mediaType: media.mediaType,
+    mediaHash,
+    mediaSize: 'size' in media ? media.size : undefined,
+  });
 
   const downloaded = await downloadTelegramMedia({
     url: mediaHash,
     mediaFormat: ApiMediaFormat.BlobUrl,
   }, COPY_MEDIA_PROGRESS);
-  if (!downloaded?.dataBlob || !(downloaded.dataBlob instanceof Blob)) return undefined;
+  if (!downloaded?.dataBlob || !(downloaded.dataBlob instanceof Blob)) {
+    logForwardStep('原媒体下载失败', { messageId: message.id, mediaHash });
+    return undefined;
+  }
+
+  logForwardStep('原媒体下载完成，开始重新上传', {
+    messageId: message.id,
+    downloadedSize: downloaded.dataBlob.size,
+  });
 
   const blobUrl = URL.createObjectURL(downloaded.dataBlob);
   try {
     const attachment = buildCopiedAttachment(media, blobUrl);
-    return uploadMedia(localMessage, attachment, COPY_MEDIA_PROGRESS);
+    const uploadedMedia = await uploadMedia(localMessage, attachment, COPY_MEDIA_PROGRESS);
+    logForwardStep('原媒体重新上传成功', {
+      messageId: message.id,
+      uploadedTransport: uploadedMedia?.className || 'unknown',
+    });
+    return uploadedMedia;
   } finally {
     URL.revokeObjectURL(blobUrl);
   }
