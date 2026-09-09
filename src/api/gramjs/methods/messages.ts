@@ -13,6 +13,7 @@ import type {
   ApiAttachment,
   ApiChat,
   ApiComposedMessageWithAI,
+  ApiDimensions,
   ApiFormattedText,
   ApiGlobalMessageSearchType,
   ApiInputAiComposeTone,
@@ -28,6 +29,7 @@ import type {
   ApiNewMediaTodo,
   ApiOnProgress,
   ApiPeer,
+  ApiPhoto,
   ApiReaction,
   ApiSearchPostsFlood,
   ApiSendMessageAction,
@@ -57,7 +59,6 @@ import {
   SUPPORTED_PHOTO_CONTENT_TYPES,
   SUPPORTED_VIDEO_CONTENT_TYPES,
 } from '../../../config';
-import { getMediaFilename, getMediaHash, getPhotoFullDimensions } from '../../../global/helpers';
 import { fetchFile } from '../../../util/files';
 import { compact, split } from '../../../util/iteratees';
 import { getMessageKey, getMtpEphemeralMessageId } from '../../../util/keys/messageKey';
@@ -143,6 +144,55 @@ import {
 const FAST_SEND_TIMEOUT = 1000;
 const INPUT_WAVEFORM_LENGTH = 63;
 const COPY_MEDIA_PROGRESS: ApiOnProgress = () => undefined;
+
+/**
+ * 根据媒体类型生成 worker 可用的下载哈希
+ */
+function getCopyMediaHash(media: DownloadableMedia) {
+  if (!('id' in media) || !media.id) return undefined;
+
+  if (media.mediaType === 'photo') {
+    return media.isVideo ? `photo${media.id}?size=u` : `photo${media.id}`;
+  }
+
+  if (media.mediaType === 'document') return `document${media.id}`;
+
+  return `document${media.id}?download`;
+}
+
+/**
+ * 根据媒体元数据生成重新上传时使用的文件名
+ */
+function getCopyMediaFilename(media: DownloadableMedia) {
+  if ('fileName' in media && media.fileName) return media.fileName;
+
+  if (media.mediaType === 'sticker') {
+    const extension = media.isLottie ? 'tgs' : media.isVideo ? 'webm' : 'webp';
+    return `${media.id}.${extension}`;
+  }
+
+  if (media.mediaType === 'photo') {
+    return `${media.id}.${media.isVideo ? 'mp4' : 'jpg'}`;
+  }
+
+  if (media.mediaType === 'voice') return `${media.id}.ogg`;
+
+  if ('id' in media && media.id) return media.id;
+
+  return `message-${media.mediaType}`;
+}
+
+/**
+ * 按现有媒体尺寸优先级提取照片的完整尺寸
+ */
+function getCopyPhotoDimensions(photo: Pick<ApiPhoto, 'sizes' | 'thumbnail'>): ApiDimensions | undefined {
+  return photo.sizes.find((size) => size.type === 'w')
+    || photo.sizes.find((size) => size.type === 'y')
+    || photo.sizes.find((size) => size.type === 'x')
+    || photo.sizes.find((size) => size.type === 'm')
+    || photo.sizes.find((size) => size.type === 's')
+    || photo.thumbnail;
+}
 
 type TranslateTextParams = ({
   text: ApiFormattedText[];
@@ -2504,7 +2554,7 @@ async function uploadCopiedMedia(message: ApiMessage, localMessage: ApiMessage) 
   const media = getMessageMediaForCopy(message);
   if (!media) return undefined;
 
-  const mediaHash = getMediaHash(media, 'download');
+  const mediaHash = getCopyMediaHash(media);
   if (!mediaHash) return undefined;
 
   const downloaded = await downloadTelegramMedia({
@@ -2537,7 +2587,7 @@ function getMessageMediaForCopy(message: ApiMessage): DownloadableMedia | undefi
  */
 function buildCopiedAttachment(media: DownloadableMedia, blobUrl: string): ApiAttachment {
   const dimensions = media.mediaType === 'photo'
-    ? getPhotoFullDimensions(media)
+    ? getCopyPhotoDimensions(media)
     : media.mediaType === 'video'
       ? { width: media.width || 0, height: media.height || 0 }
       : media.mediaType === 'document' ? media.mediaSize : undefined;
@@ -2549,7 +2599,7 @@ function buildCopiedAttachment(media: DownloadableMedia, blobUrl: string): ApiAt
 
   return {
     blobUrl,
-    filename: getMediaFilename(media),
+    filename: getCopyMediaFilename(media),
     mimeType,
     size: 'size' in media ? media.size : 0,
     quick: dimensions && {
