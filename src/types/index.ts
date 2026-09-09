@@ -22,6 +22,7 @@ import type {
   ApiMediaFormat,
   ApiMessage,
   ApiMessageEntity,
+  ApiMessagePoll,
   ApiNewMediaTodo,
   ApiNewPoll,
   ApiPageBlockPhoto,
@@ -865,6 +866,7 @@ export type ForwardMessagesParams = {
   isCurrentUserPremium?: boolean;
   wasDrafted?: boolean;
   lastMessageId?: number;
+  polls?: Record<string, ApiMessagePoll>;
   forwardedLocalMessagesSlice?: ForwardedLocalMessagesSlice;
   messagePriceInStars?: number;
   effectId?: string;

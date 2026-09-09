@@ -17,7 +17,6 @@ import type {
   ThreadId,
   TranslationTone,
 } from '../../types';
-import type { IAllowedAttachmentOptions } from '../helpers';
 import type {
   GlobalState, TabArgs,
 } from '../types';
@@ -40,7 +39,6 @@ import { getDocumentExtension } from '../../components/common/helpers/documentIn
 import { API_GENERAL_ID_LIMIT } from '../../limits';
 import {
   canSendReaction,
-  getAllowedAttachmentOptions,
   getCanPostInChat,
   getHasAdminRight,
   getIsSavedDialog,
@@ -77,14 +75,12 @@ import {
   selectChatFullInfo,
   selectChatLastMessageId,
   selectIsChatRestricted,
-  selectIsChatWithBot,
   selectIsChatWithSelf,
   selectRequestedChatTranslationLanguage,
 } from './chats';
 import { selectCurrentLimit } from './limits';
 import { selectMessageDownloadableMedia } from './media';
 import { selectPeer, selectPeerPaidMessagesStars } from './peers';
-import { selectPeerStory } from './stories';
 import { selectCustomEmoji, selectIsStickerFavorite } from './symbols';
 import { selectTabState } from './tabs';
 import {
@@ -515,30 +511,8 @@ export function selectCanReplyToMessage<T extends GlobalState>(global: T, messag
 }
 
 export function selectCanForwardMessage<T extends GlobalState>(global: T, message: ApiMessage) {
-  if (message.isEphemeral) return false;
-
-  const isLocal = isMessageLocal(message);
-  const isServiceNotification = isServiceNotificationMessage(message);
-  const isAction = isActionMessage(message);
-  const hasTtl = hasMessageTtl(message);
-  const { content } = message;
-
-  const webPage = selectFullWebPageFromMessage(global, message);
-
-  const story = content.storyData
-    ? selectPeerStory(global, content.storyData.peerId, content.storyData.id)
-    : (webPage?.story
-      ? selectPeerStory(global, webPage.story.peerId, webPage.story.id)
-      : undefined
-    );
-  const isChatProtected = selectIsChatProtected(global, message.chatId);
-  const isStoryForwardForbidden = story && ('isDeleted' in story || ('noForwards' in story && story.noForwards));
-  const canForward = (
-    !isLocal && !isAction && !isChatProtected && !isStoryForwardForbidden
-    && (message.isForwardingAllowed || isServiceNotification) && !hasTtl
-  );
-
-  return canForward;
+  // 所有已落地的消息都允许进入转发流程，最终发送方式由服务端结果决定
+  return !message.isEphemeral && !isMessageLocal(message);
 }
 
 // This selector is slow and not to be used within lists (e.g. Message component)
@@ -1241,10 +1215,6 @@ export function selectHasProtectedMessage<T extends GlobalState>(global: T, chat
 }
 
 export function selectCanForwardMessages<T extends GlobalState>(global: T, chatId: string, messageIds?: number[]) {
-  if (selectIsChatProtected(global, chatId)) {
-    return false;
-  }
-
   if (!messageIds) {
     return false;
   }
@@ -1466,50 +1436,6 @@ export function selectReplyCanBeSentToChat<T extends GlobalState>(
 
   return !isExpiredMessage(message);
 }
-export function selectForwardsCanBeSentToChat<T extends GlobalState>(
-  global: T,
-  toChatId: string,
-  ...[tabId = getCurrentTabId()]: TabArgs<T>
-) {
-  const { messageIds, storyId, fromChatId } = selectTabState(global, tabId).forwardMessages;
-  const chat = selectChat(global, toChatId);
-  if ((!messageIds && !storyId) || !chat) return false;
-
-  if (storyId) {
-    return true;
-  }
-
-  const chatFullInfo = selectChatFullInfo(global, toChatId);
-  const chatMessages = selectChatMessages(global, fromChatId!);
-
-  const isSavedMessages = toChatId ? selectIsChatWithSelf(global, toChatId) : undefined;
-  const isChatWithBot = toChatId ? selectIsChatWithBot(global, toChatId) : undefined;
-  const options = getAllowedAttachmentOptions(chat, chatFullInfo, isChatWithBot, isSavedMessages);
-  return !messageIds!.some((messageId) => сheckMessageSendingDenied(chatMessages[messageId], options));
-}
-function сheckMessageSendingDenied(message: ApiMessage, options: IAllowedAttachmentOptions) {
-  const isVoice = message.content.voice;
-  const isRoundVideo = message.content.video?.isRound;
-  const isPhoto = message.content.photo;
-  const isGif = message.content.video?.isGif;
-  const isVideo = message.content.video && !isRoundVideo && !isGif;
-  const isAudio = message.content.audio;
-  const isDocument = message.content.document;
-  const isSticker = message.content.sticker;
-  const isPlainText = message.content.text
-    && !isVoice && !isRoundVideo && !isSticker && !isDocument && !isAudio && !isVideo && !isPhoto && !isGif;
-
-  return (isVoice && !options.canSendVoices)
-    || (isRoundVideo && !options.canSendRoundVideos)
-    || (isSticker && !options.canSendStickers)
-    || (isDocument && !options.canSendDocuments)
-    || (isAudio && !options.canSendAudios)
-    || (isVideo && !options.canSendVideos)
-    || (isPhoto && !options.canSendPhotos)
-    || (isGif && !options.canSendGifs)
-    || (isPlainText && !options.canSendPlainText);
-}
-
 export function selectCanTranslateMessage<T extends GlobalState>(
   global: T, message: ApiMessage, detectedLanguage?: string, ...[tabId = getCurrentTabId()]: TabArgs<T>
 ) {

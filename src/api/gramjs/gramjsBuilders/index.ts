@@ -40,6 +40,7 @@ import type {
   ApiThemeParameters,
   ApiTypeCurrencyAmount,
   ApiVideo,
+  ApiVoice,
   MediaContent,
 } from '../../types';
 import {
@@ -202,7 +203,7 @@ export function buildInputStickerSetShortName(shortName: string) {
   });
 }
 
-export function buildInputDocument(media: ApiAudio | ApiSticker | ApiVideo | ApiDocument) {
+export function buildInputDocument(media: ApiAudio | ApiSticker | ApiVideo | ApiVoice | ApiDocument) {
   if (!media.id) {
     return undefined;
   }
@@ -220,7 +221,9 @@ export function buildInputDocument(media: ApiAudio | ApiSticker | ApiVideo | Api
   ]));
 }
 
-export function buildInputMediaDocument(media: ApiSticker | ApiVideo | ApiDocument, spoiler?: true) {
+export function buildInputMediaDocument(
+  media: ApiAudio | ApiSticker | ApiVideo | ApiVoice | ApiDocument, spoiler?: true,
+) {
   const inputDocument = buildInputDocument(media);
 
   if (!inputDocument) {
@@ -275,7 +278,7 @@ export function buildInputPoll(
   });
 }
 
-export function buildInputPollFromExisting(poll: ApiMessagePoll, shouldClose = false) {
+export function buildInputPollFromExisting(poll: ApiMessagePoll, shouldClose = false): GramJs.InputMediaPoll {
   return new GramJs.InputMediaPoll({
     poll: new GramJs.Poll({
       id: BigInt(poll.summary.id),
@@ -312,7 +315,9 @@ export function buildInputPollFromExisting(poll: ApiMessagePoll, shouldClose = f
   });
 }
 
-function buildInputMediaFromContent(content?: MediaContent) {
+export function buildInputMediaFromContent(
+  content?: MediaContent, poll?: ApiMessagePoll,
+): GramJs.TypeInputMedia | undefined {
   if (!content) {
     return undefined;
   }
@@ -339,6 +344,37 @@ function buildInputMediaFromContent(content?: MediaContent) {
 
   if (content.sticker) {
     return buildInputMediaDocument(content.sticker);
+  }
+
+  if (content.audio) {
+    return buildInputMediaDocument(content.audio);
+  }
+
+  if (content.voice) {
+    return buildInputMediaDocument(content.voice);
+  }
+
+  if (content.contact) {
+    return new GramJs.InputMediaContact({
+      phoneNumber: content.contact.phoneNumber,
+      firstName: content.contact.firstName,
+      lastName: content.contact.lastName,
+      vcard: DEFAULT_PRIMITIVES.STRING,
+    });
+  }
+
+  if (content.todo) {
+    return buildInputTodo({ todo: content.todo.todo });
+  }
+
+  if (content.dice) {
+    return new GramJs.InputMediaDice({
+      emoticon: content.dice.emoticon,
+    });
+  }
+
+  if (content.pollId && poll) {
+    return buildInputPollFromExisting(poll, true);
   }
 
   return undefined;

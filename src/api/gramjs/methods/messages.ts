@@ -2,6 +2,7 @@ import { Api as GramJs } from '../../../lib/gramjs';
 import { RPCError } from '../../../lib/gramjs/errors';
 import { generateRandomBigInt } from '../../../lib/gramjs/Helpers';
 
+import type { DownloadableMedia } from '../../../global/helpers';
 import type {
   ForwardMessagesParams,
   SendMessageParams,
@@ -40,6 +41,7 @@ import type {
   MediaContent,
 } from '../../types';
 import {
+  ApiMediaFormat,
   MAIN_THREAD_ID,
   MESSAGE_DELETED,
 } from '../../types';
@@ -55,6 +57,7 @@ import {
   SUPPORTED_PHOTO_CONTENT_TYPES,
   SUPPORTED_VIDEO_CONTENT_TYPES,
 } from '../../../config';
+import { getMediaFilename, getMediaHash, getPhotoFullDimensions } from '../../../global/helpers';
 import { fetchFile } from '../../../util/files';
 import { compact, split } from '../../../util/iteratees';
 import { getMessageKey, getMtpEphemeralMessageId } from '../../../util/keys/messageKey';
@@ -100,6 +103,7 @@ import {
   buildInputChannel,
   buildInputDocument,
   buildInputMediaDocument,
+  buildInputMediaFromContent,
   buildInputPeer,
   buildInputPhoto,
   buildInputPoll,
@@ -129,10 +133,16 @@ import { sendApiUpdate } from '../updates/apiUpdateEmitter';
 import { processMessageAndUpdateThreadInfo } from '../updates/entityProcessor';
 import { processAffectedHistory, updateChannelState } from '../updates/updateManager';
 import { requestChatUpdate } from './chats';
-import { handleGramJsUpdate, invokeRequest, uploadFile } from './client';
+import {
+  downloadMedia as downloadTelegramMedia,
+  handleGramJsUpdate,
+  invokeRequest,
+  uploadFile,
+} from './client';
 
 const FAST_SEND_TIMEOUT = 1000;
 const INPUT_WAVEFORM_LENGTH = 63;
+const COPY_MEDIA_PROGRESS: ApiOnProgress = () => undefined;
 
 type TranslateTextParams = ({
   text: ApiFormattedText[];
@@ -2371,6 +2381,9 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
     });
     if (update) handleMultipleLocalMessagesUpdate(messagesForUpdate, update);
   } catch (error: any) {
+    const hasAttemptedCopy = await copyForwardedMessages(params, localMessages);
+    if (hasAttemptedCopy) return;
+
     Object.values(localMessages).forEach((localMessage) => {
       sendApiUpdate({
         '@type': localMessage.isScheduled ? 'updateScheduledMessageSendFailed' : 'updateMessageSendFailed',
@@ -2380,6 +2393,184 @@ export async function forwardApiMessages(params: ForwardMessagesParams) {
       });
     });
   }
+}
+
+/**
+ * 使用原消息的媒体引用逐条发送，保留媒体、文本和其他可复制内容的类型
+ */
+async function copyForwardedMessages(params: ForwardMessagesParams, localMessages: ApiMessage[]) {
+  const copiedResults = await Promise.all(params.messages.map((message, index) => {
+    const localMessage = localMessages[index];
+    if (!localMessage) return Promise.resolve(false);
+
+    return copyForwardedMessage(params, message, localMessage);
+  }));
+
+  return copiedResults.length > 0;
+}
+
+/**
+ * 将单条消息转换为无来源的发送请求，并把发送结果合并到本地占位消息
+ */
+async function copyForwardedMessage(
+  params: ForwardMessagesParams,
+  message: ApiMessage,
+  localMessage: ApiMessage,
+) {
+  const { noCaptions, toChat } = params;
+  const inputMedia = buildInputMediaFromContent(message.content, params.polls?.[String(message.id)]);
+  const text = noCaptions && inputMedia ? undefined : message.content.text;
+  try {
+    let update;
+    try {
+      update = await sendCopiedMessageRequest(params, message, text, inputMedia);
+    } catch (error: any) {
+      const uploadedMedia = await uploadCopiedMedia(message, localMessage);
+      if (!uploadedMedia) throw error;
+
+      update = await sendCopiedMessageRequest(params, message, text, uploadedMedia);
+    }
+
+    if (!update) return false;
+
+    handleLocalMessageUpdate(localMessage, update);
+    return true;
+  } catch (error: any) {
+    sendApiUpdate({
+      '@type': localMessage.isScheduled ? 'updateScheduledMessageSendFailed' : 'updateMessageSendFailed',
+      chatId: toChat.id,
+      localId: localMessage.id,
+      error: error.errorMessage,
+    });
+    return false;
+  }
+}
+
+/**
+ * 按消息内容类型发送无来源消息，统一处理文本和媒体的 MTProto 参数
+ */
+async function sendCopiedMessageRequest(
+  params: ForwardMessagesParams,
+  message: ApiMessage,
+  text: ApiMessage['content']['text'],
+  inputMedia?: GramJs.TypeInputMedia,
+) {
+  const {
+    toChat, toThreadId, isSilent, scheduledAt, scheduleRepeatPeriod, sendAs, effectId,
+  } = params;
+  const randomId = generateRandomBigInt();
+  const replyTo = toThreadId && toThreadId !== MAIN_THREAD_ID ? buildInputReplyTo({
+    type: 'message',
+    replyToMsgId: Number(toThreadId),
+    replyToTopId: Number(toThreadId),
+  }) : undefined;
+  const sharedArgs = {
+    clearDraft: true as const,
+    message: text?.text || DEFAULT_PRIMITIVES.STRING,
+    entities: text?.entities?.map(buildMtpMessageEntity),
+    peer: buildInputPeer(toChat.id, toChat.accessHash),
+    randomId,
+    replyTo,
+    silent: isSilent || undefined,
+    scheduleDate: scheduledAt,
+    scheduleRepeatPeriod,
+    sendAs: sendAs && buildInputPeer(sendAs.id, sendAs.accessHash),
+    effect: effectId ? BigInt(effectId) : undefined,
+  };
+
+  if (inputMedia) {
+    return invokeRequest(new GramJs.messages.SendMedia({
+      ...sharedArgs,
+      media: inputMedia,
+    }), {
+      shouldThrow: true,
+      shouldIgnoreUpdates: true,
+    });
+  }
+
+  return invokeRequest(new GramJs.messages.SendMessage({
+    ...sharedArgs,
+    noWebpage: message.content.webPage ? true : undefined,
+  }), {
+    shouldThrow: true,
+    shouldIgnoreUpdates: true,
+  });
+}
+
+/**
+ * 下载原媒体并重新上传，在直接复用媒体引用也被服务端拒绝时提供最后兜底
+ */
+async function uploadCopiedMedia(message: ApiMessage, localMessage: ApiMessage) {
+  const media = getMessageMediaForCopy(message);
+  if (!media) return undefined;
+
+  const mediaHash = getMediaHash(media, 'download');
+  if (!mediaHash) return undefined;
+
+  const downloaded = await downloadTelegramMedia({
+    url: mediaHash,
+    mediaFormat: ApiMediaFormat.BlobUrl,
+  }, COPY_MEDIA_PROGRESS);
+  if (!downloaded?.dataBlob || !(downloaded.dataBlob instanceof Blob)) return undefined;
+
+  const blobUrl = URL.createObjectURL(downloaded.dataBlob);
+  try {
+    const attachment = buildCopiedAttachment(media, blobUrl);
+    return uploadMedia(localMessage, attachment, COPY_MEDIA_PROGRESS);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+/**
+ * 从消息内容中提取可下载的 Telegram 媒体
+ */
+function getMessageMediaForCopy(message: ApiMessage): DownloadableMedia | undefined {
+  const {
+    photo, video, document, sticker, audio, voice,
+  } = message.content;
+  return photo || video || document || sticker || audio || voice;
+}
+
+/**
+ * 将已下载的媒体转换为现有上传流程所需的附件描述
+ */
+function buildCopiedAttachment(media: DownloadableMedia, blobUrl: string): ApiAttachment {
+  const dimensions = media.mediaType === 'photo'
+    ? getPhotoFullDimensions(media)
+    : media.mediaType === 'video'
+      ? { width: media.width || 0, height: media.height || 0 }
+      : media.mediaType === 'document' ? media.mediaSize : undefined;
+  const mimeType = 'mimeType' in media
+    ? media.mimeType
+    : media.mediaType === 'photo' ? 'image/jpeg'
+      : media.mediaType === 'voice' ? 'audio/ogg'
+        : 'application/octet-stream';
+
+  return {
+    blobUrl,
+    filename: getMediaFilename(media),
+    mimeType,
+    size: 'size' in media ? media.size : 0,
+    quick: dimensions && {
+      width: dimensions.width,
+      height: dimensions.height,
+      duration: media.mediaType === 'video' ? media.duration : undefined,
+    },
+    audio: media.mediaType === 'audio' ? {
+      duration: media.duration,
+      title: media.title,
+      performer: media.performer,
+    } : undefined,
+    voice: media.mediaType === 'voice' ? {
+      duration: media.duration,
+      waveform: media.waveform || [],
+    } : undefined,
+    shouldSendAsFile: media.mediaType === 'document' ? true : undefined,
+    shouldSendAsSpoiler: media.mediaType === 'photo' || media.mediaType === 'video'
+      ? (media.isSpoiler ? true : undefined) : undefined,
+    isRoundVideo: media.mediaType === 'video' ? media.isRound : undefined,
+  };
 }
 
 export async function forwardMessages(params: ForwardMessagesParams) {

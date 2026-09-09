@@ -12,6 +12,7 @@ import type {
   ApiInputSuggestedPostInfo,
   ApiMessage,
   ApiMessageEntity,
+  ApiMessagePoll,
   ApiMessageReadMetric,
   ApiOnProgress,
   ApiSticker,
@@ -133,7 +134,6 @@ import {
   updateThreadReadState,
 } from '../../reducers/threads';
 import {
-  selectCanForwardMessage,
   selectChat,
   selectChatFullInfo,
   selectChatLastMessageId,
@@ -148,7 +148,6 @@ import {
   selectFirstMessageId,
   selectFirstUnreadId,
   selectFocusedMessageId,
-  selectForwardsCanBeSentToChat,
   selectForwardsContainVoiceMessages,
   selectIsChatBotNotStarted,
   selectIsChatRestricted,
@@ -2006,6 +2005,17 @@ addActionHandler('forwardMessages', (global, actions, payload): ActionReturnType
   executeForwardMessages(global, { chat: toChat, isSilent, scheduledAt, scheduleRepeatPeriod }, tabId);
 });
 
+/**
+ * 收集复制发送兜底所需的投票定义，避免只携带消息中的投票 ID
+ */
+function buildForwardedPolls(global: GlobalState, messages: ApiMessage[]) {
+  return messages.reduce<Record<string, ApiMessagePoll>>((polls, message) => {
+    const poll = selectPollFromMessage(global, message);
+    if (poll) polls[message.id] = poll;
+    return polls;
+  }, {});
+}
+
 async function executeForwardMessages(global: GlobalState, sendParams: SendMessageParams, tabId: number) {
   const {
     fromChatId, messageIds, toChatId, withMyScore, noAuthors, noCaptions, toThreadId = MAIN_THREAD_ID,
@@ -2037,7 +2047,7 @@ async function executeForwardMessages(global: GlobalState, sendParams: SendMessa
   const localMessages: SendMessageParams[] = [];
 
   const [realMessages, serviceMessages] = partition(messages, (m) => !isServiceNotificationMessage(m));
-  const forwardableRealMessages = realMessages.filter((message) => selectCanForwardMessage(global, message));
+  const forwardableRealMessages = realMessages;
   if (forwardableRealMessages.length) {
     const messageSlices = global.config?.maxForwardedCount
       ? splitMessagesForForwarding(forwardableRealMessages, global.config.maxForwardedCount)
@@ -2059,6 +2069,7 @@ async function executeForwardMessages(global: GlobalState, sendParams: SendMessa
         isCurrentUserPremium,
         wasDrafted: Boolean(draft),
         lastMessageId,
+        polls: buildForwardedPolls(global, slice),
         messagePriceInStars,
         effectId: forwardEffectId,
       };
@@ -3194,11 +3205,6 @@ addActionHandler('setForwardChatOrTopic', async (global, actions, payload): Prom
   }
   global = getGlobal();
 
-  if (!selectForwardsCanBeSentToChat(global, chatId, tabId)) {
-    actions.showAllowedMessageTypesNotification({ chatId, tabId });
-    return;
-  }
-
   global = updateTabState(global, {
     forwardMessages: {
       ...selectTabState(global, tabId).forwardMessages,
@@ -3298,6 +3304,7 @@ function forwardMessagesToChat({
         isCurrentUserPremium,
         wasDrafted: false,
         lastMessageId,
+        polls: buildForwardedPolls(global, slice),
         messagePriceInStars,
       };
 
@@ -3344,7 +3351,7 @@ addActionHandler('forwardToMultipleChats', (global, actions, payload): ActionRet
   }
 
   const [realMessages, serviceMessages] = partition(messages, (m) => !isServiceNotificationMessage(m));
-  const forwardableRealMessages = realMessages.filter((message) => selectCanForwardMessage(global, message));
+  const forwardableRealMessages = realMessages;
 
   if (!forwardableRealMessages.length && !serviceMessages.length) {
     return;
